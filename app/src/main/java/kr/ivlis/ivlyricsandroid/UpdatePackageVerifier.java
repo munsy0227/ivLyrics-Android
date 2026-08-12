@@ -18,17 +18,14 @@ import java.util.List;
 import java.util.Locale;
 
 final class UpdatePackageVerifier {
-    private static final String RELEASE_PATH_PREFIX =
-            "/ivLis-Studio/ivLyrics-Android/releases/download/";
-
     private UpdatePackageVerifier() {
     }
 
     static URL requireReleaseAssetUrl(String value) throws IOException {
         URL url = parseHttpsUrl(value);
         if (!"github.com".equalsIgnoreCase(url.getHost())
-                || !url.getPath().startsWith(RELEASE_PATH_PREFIX)) {
-            throw new IOException("Update APK URL is not an ivLyrics GitHub release asset");
+                || !url.getPath().startsWith(AppReleaseConfig.RELEASE_DOWNLOAD_PATH_PREFIX)) {
+            throw new IOException("Update APK URL is not from the configured GitHub release repository");
         }
         return url;
     }

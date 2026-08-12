@@ -24,9 +24,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 final class UpdateChecker {
-    private static final String LATEST_RELEASE_URL =
-            "https://api.github.com/repos/ivLis-Studio/ivLyrics-Android/releases/latest";
-
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Context appContext;
@@ -62,7 +59,7 @@ final class UpdateChecker {
     }
 
     private UpdateInfo loadLatestRelease() throws Exception {
-        JSONObject release = new JSONObject(readUrl(LATEST_RELEASE_URL));
+        JSONObject release = new JSONObject(readUrl(AppReleaseConfig.LATEST_RELEASE_API_URL));
         String tag = release.optString("tag_name", "");
         String releaseUrl = release.optString("html_url", "");
         String releaseName = release.optString("name", tag);

@@ -182,9 +182,16 @@ def apk_assets(apk_dir):
 
 
 def compare_url(current_tag, previous):
+    repository = os.environ.get(
+        "GITHUB_REPOSITORY",
+        "munsy0227/ivLyrics-Android",
+    ).strip()
     if previous:
-        return f"https://github.com/ivLis-Studio/ivLyrics-Android/compare/{previous}...{current_tag}"
-    return f"https://github.com/ivLis-Studio/ivLyrics-Android/commits/{current_tag}"
+        return (
+            f"https://github.com/{repository}/compare/"
+            f"{previous}...{current_tag}"
+        )
+    return f"https://github.com/{repository}/commits/{current_tag}"
 
 
 def markdown_bullets(values):

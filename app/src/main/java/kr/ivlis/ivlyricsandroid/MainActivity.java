@@ -4762,7 +4762,7 @@ public final class MainActivity extends Activity implements
         updateButtonRow.addView(checkUpdatesButton, weightedButtonParams(1.2f, dp(4)));
 
         TextView releasePageButton = debugButton(ui("button.open_release_page"));
-        releasePageButton.setOnClickListener(view -> openExternalUrl("https://github.com/ivLis-Studio/ivLyrics-Android/releases"));
+        releasePageButton.setOnClickListener(view -> openExternalUrl(AppReleaseConfig.RELEASES_URL));
         updateButtonRow.addView(releasePageButton, weightedButtonParams(1f, dp(4)));
 
         settingsSystemPage.addView(settingGroup(
@@ -10976,7 +10976,7 @@ public final class MainActivity extends Activity implements
 
     private void openUpdateReleasePage(UpdateChecker.UpdateInfo info) {
         String url = info == null || info.releaseUrl.isEmpty()
-                ? "https://github.com/ivLis-Studio/ivLyrics-Android/releases"
+                ? AppReleaseConfig.RELEASES_URL
                 : info.releaseUrl;
         openExternalUrl(url);
     }

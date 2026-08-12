@@ -39,7 +39,7 @@ Spotify에서 재생 중인 곡을 감지하고, ivLyrics 커뮤니티 싱크 �
 
 ## 설치
 
-<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/ivLis-Studio/ivLyrics-Android">
+<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/munsy0227/ivLyrics-Android">
   <img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Obtainium에서 받기" height="60">
 </a>
 
@@ -50,7 +50,7 @@ Spotify에서 재생 중인 곡을 감지하고, ivLyrics 커뮤니티 싱크 �
 3. 설치 중 보안 안내가 나오면, APK를 받은 앱에 대해 "알 수 없는 앱 설치"를 허용합니다.
 4. ivLyrics Android를 실행하고 첫 설정을 진행합니다.
 
-최신 APK는 [Releases](https://github.com/ivLis-Studio/ivLyrics-Android/releases)에서 받을 수 있습니다.
+최신 APK는 [Releases](https://github.com/munsy0227/ivLyrics-Android/releases)에서 받을 수 있습니다.
 
 ## 가사 페이지 팁
 
