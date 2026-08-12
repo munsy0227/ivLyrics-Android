@@ -55,6 +55,10 @@ jobs:
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             release_tag="${{ inputs.tag }}"
           fi
+          if ! git rev-parse --verify "${release_tag}^{commit}" >/dev/null 2>&1; then
+            echo "::error::Release tag does not exist: ${release_tag}"
+            exit 1
+          fi
           RELEASE_TAG="${release_tag}" python3 .github/scripts/verify_release_version.py
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
 
@@ -174,7 +178,6 @@ jobs:
         run: |
           set -euo pipefail
           release_tag="${{ steps.release.outputs.release_tag }}"
-          release_target="$(git rev-parse --verify "${release_tag}^{commit}" 2>/dev/null || git rev-parse HEAD)"
           mkdir -p release-apks
           while IFS= read -r apk; do
             if [[ "${apk}" == *"/release/"* && "${apk}" == *"unsigned"* ]]; then
@@ -190,7 +193,6 @@ jobs:
           done < <(find app/build/outputs/apk/release -maxdepth 1 -type f -name "*.apk" | sort)
           {
             echo "release_tag=${release_tag}"
-            echo "release_target=${release_target}"
             echo "apk_list<<EOF"
             find release-apks -type f -name "*.apk" -print | sort
             echo "EOF"
@@ -220,7 +222,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.collect.outputs.release_tag }}
-          RELEASE_TARGET: ${{ steps.collect.outputs.release_target }}
           PRERELEASE: ${{ inputs.prerelease || false }}
         shell: bash
         run: |
@@ -237,14 +238,12 @@ jobs:
                 fi
               done
             gh release edit "${RELEASE_TAG}" \
-              --target "${RELEASE_TARGET}" \
               --title "ivLyrics Android ${RELEASE_TAG}" \
               --notes-file release-metadata/release-notes.md \
               "${args[@]}"
             gh release upload "${RELEASE_TAG}" release-apks/*.apk release-metadata/* --clobber
           else
             gh release create "${RELEASE_TAG}" release-apks/*.apk release-metadata/* \
-              --target "${RELEASE_TARGET}" \
               --title "ivLyrics Android ${RELEASE_TAG}" \
               --notes-file release-metadata/release-notes.md \
               "${args[@]}"

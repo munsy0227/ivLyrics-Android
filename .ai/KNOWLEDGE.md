@@ -74,7 +74,10 @@ Webhook과 AI 릴리스 노트 Secrets는 선택 사항이며 없어도 정식 �
 한다. 이전 태그가 없는 첫 릴리스는 Git 기록에서 직전 `versionName`의 커밋을
 찾아 비교 기준으로 사용한다. 릴리스 노트는 GitHub 본문 제한보다 작은 120,000자로
 제한한다. Actions의 `apksigner` 검증과 위 인증서 SHA-256 일치 검사를 통과하지
-못한 APK는 게시하지 않는다.
+못한 APK는 게시하지 않는다. Release 생성 전에 태그가 이미 존재해야 하며,
+workflow는 기존 태그를 그대로 사용하고 `target_commitish`를 별도로 보내지 않는다.
+이는 Actions의 제한된 토큰으로도 태그 대상을 바꾸지 않고 Release를 게시하기 위한
+규칙이다.
 
 ## 변경 후 검증
 
