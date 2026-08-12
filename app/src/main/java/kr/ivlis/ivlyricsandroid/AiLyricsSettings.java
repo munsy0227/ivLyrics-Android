@@ -136,10 +136,11 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
     static final String PIP_ORIENTATION_LANDSCAPE = "landscape";
     static final String PIP_ORIENTATION_PORTRAIT = "portrait";
     static final String PIP_ORIENTATION_SQUARE = "square";
-    static final String CULTURAL_FONT_PRETENDARD = "pretendard";
+    static final String CULTURAL_FONT_NOTO_SERIF_KR = "noto_serif_kr";
     static final String CULTURAL_FONT_SYSTEM = "system";
     static final String CULTURAL_FONT_SERIF = "serif";
     static final String CULTURAL_FONT_MONOSPACE = "monospace";
+    private static final String LEGACY_CULTURAL_FONT_PRETENDARD = "pretendard";
     private static final String DEFAULT_PROVIDER = "gemini";
     private static final String DEFAULT_TARGET_LANG_RULES = OUTPUT_LANG_SAME_UI;
     private static final String DEFAULT_BACKGROUND_MODE = BACKGROUND_MODE_GRADIENT;
@@ -419,11 +420,11 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                 providerEnabled,
                 providerProfiles,
                 prefs.getBoolean(KEY_CULTURAL_ANNOTATIONS_ENABLED, false),
-                normalizeCulturalFontFamily(prefs.getString(KEY_CULTURAL_ANNOTATIONS_FONT_FAMILY, CULTURAL_FONT_PRETENDARD)),
+                normalizeCulturalFontFamily(prefs.getString(KEY_CULTURAL_ANNOTATIONS_FONT_FAMILY, CULTURAL_FONT_NOTO_SERIF_KR)),
                 clampInt(prefs.getInt(KEY_CULTURAL_ANNOTATIONS_FONT_SIZE, 14), 10, 28),
                 normalizeCulturalFontWeight(prefs.getInt(KEY_CULTURAL_ANNOTATIONS_FONT_WEIGHT, 300)),
                 clampInt(prefs.getInt(KEY_CULTURAL_ANNOTATIONS_OPACITY, 60), 20, 100),
-                normalizeCulturalFontFamily(prefs.getString(KEY_CULTURAL_ANNOTATIONS_VINYL_FONT_FAMILY, CULTURAL_FONT_PRETENDARD)),
+                normalizeCulturalFontFamily(prefs.getString(KEY_CULTURAL_ANNOTATIONS_VINYL_FONT_FAMILY, CULTURAL_FONT_NOTO_SERIF_KR)),
                 clampInt(prefs.getInt(KEY_CULTURAL_ANNOTATIONS_VINYL_FONT_SIZE, 12), 10, 28),
                 normalizeCulturalFontWeight(prefs.getInt(KEY_CULTURAL_ANNOTATIONS_VINYL_FONT_WEIGHT, 300)),
                 clampInt(prefs.getInt(KEY_CULTURAL_ANNOTATIONS_VINYL_OPACITY, 60), 20, 100),
@@ -1575,12 +1576,16 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
 
     static String normalizeCulturalFontFamily(String family) {
         String normalized = family == null ? "" : family.trim().toLowerCase(Locale.ROOT);
+        if (CULTURAL_FONT_NOTO_SERIF_KR.equals(normalized)
+                || LEGACY_CULTURAL_FONT_PRETENDARD.equals(normalized)) {
+            return CULTURAL_FONT_NOTO_SERIF_KR;
+        }
         if (CULTURAL_FONT_SYSTEM.equals(normalized)
                 || CULTURAL_FONT_SERIF.equals(normalized)
                 || CULTURAL_FONT_MONOSPACE.equals(normalized)) {
             return normalized;
         }
-        return CULTURAL_FONT_PRETENDARD;
+        return CULTURAL_FONT_NOTO_SERIF_KR;
     }
 
     static int normalizeCulturalFontWeight(int weight) {

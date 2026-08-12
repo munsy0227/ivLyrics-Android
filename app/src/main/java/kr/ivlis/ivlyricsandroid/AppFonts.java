@@ -13,21 +13,21 @@ final class AppFonts {
 
     static Typeface regular(Context context) {
         if (regular == null) {
-            regular = load(context, "fonts/Pretendard-Regular.ttf", Typeface.NORMAL);
+            regular = load(context, "fonts/NotoSerifKR-Regular.ttf", Typeface.NORMAL);
         }
         return regular;
     }
 
     static Typeface semiBold(Context context) {
         if (semiBold == null) {
-            semiBold = load(context, "fonts/Pretendard-SemiBold.ttf", Typeface.BOLD);
+            semiBold = load(context, "fonts/NotoSerifKR-SemiBold.ttf", Typeface.BOLD);
         }
         return semiBold;
     }
 
     static Typeface bold(Context context) {
         if (bold == null) {
-            bold = load(context, "fonts/Pretendard-Bold.ttf", Typeface.BOLD);
+            bold = load(context, "fonts/NotoSerifKR-Bold.ttf", Typeface.BOLD);
         }
         return bold;
     }

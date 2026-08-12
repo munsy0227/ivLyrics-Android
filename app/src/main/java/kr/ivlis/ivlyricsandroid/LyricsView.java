@@ -145,7 +145,7 @@ public final class LyricsView extends View {
     private boolean pronunciationLoading;
     private boolean translationLoading;
     private List<CulturalAnnotation> culturalAnnotations = Collections.emptyList();
-    private String culturalAnnotationFontFamily = AiLyricsSettings.CULTURAL_FONT_PRETENDARD;
+    private String culturalAnnotationFontFamily = AiLyricsSettings.CULTURAL_FONT_NOTO_SERIF_KR;
     private int culturalAnnotationFontSize = 14;
     private int culturalAnnotationFontWeight = 300;
     private int culturalAnnotationOpacity = 60;

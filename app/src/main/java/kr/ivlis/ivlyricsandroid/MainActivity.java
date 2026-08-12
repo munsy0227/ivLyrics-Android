@@ -7353,7 +7353,7 @@ public final class MainActivity extends Activity implements
         }
         culturalAnnotationFontButtonsContainer.removeAllViews();
         String[][] fonts = {
-                {AiLyricsSettings.CULTURAL_FONT_PRETENDARD, "font.pretendard"},
+                {AiLyricsSettings.CULTURAL_FONT_NOTO_SERIF_KR, "font.noto_serif_kr"},
                 {AiLyricsSettings.CULTURAL_FONT_SYSTEM, "font.system"},
                 {AiLyricsSettings.CULTURAL_FONT_SERIF, "font.serif"},
                 {AiLyricsSettings.CULTURAL_FONT_MONOSPACE, "font.monospace"}
@@ -7384,7 +7384,7 @@ public final class MainActivity extends Activity implements
         }
         culturalAnnotationVinylFontButtonsContainer.removeAllViews();
         String[][] fonts = {
-                {AiLyricsSettings.CULTURAL_FONT_PRETENDARD, "font.pretendard"},
+                {AiLyricsSettings.CULTURAL_FONT_NOTO_SERIF_KR, "font.noto_serif_kr"},
                 {AiLyricsSettings.CULTURAL_FONT_SYSTEM, "font.system"},
                 {AiLyricsSettings.CULTURAL_FONT_SERIF, "font.serif"},
                 {AiLyricsSettings.CULTURAL_FONT_MONOSPACE, "font.monospace"}

@@ -98,7 +98,7 @@ final class MainLyricPreviewView extends View {
     private boolean karaokeBounceEffectEnabled = true;
     private boolean karaokeDataAsLineSynced;
     private float textScale = 1f;
-    private String culturalAnnotationFontFamily = AiLyricsSettings.CULTURAL_FONT_PRETENDARD;
+    private String culturalAnnotationFontFamily = AiLyricsSettings.CULTURAL_FONT_NOTO_SERIF_KR;
     private int culturalAnnotationFontSize = 12;
     private int culturalAnnotationFontWeight = 300;
     private int culturalAnnotationOpacity = 60;
