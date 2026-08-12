@@ -11,7 +11,8 @@
 
 - GitHub 저장소: `munsy0227/ivLyrics-Android`
 - Android 패키지 ID: `kr.ivlis.ivlyricsandroid`
-- 앱 기본 글꼴: Noto Serif KR의 `Regular`, `SemiBold`, `Bold`
+- 앱 기본 글꼴: `NotoSerifCJK-VF.ttf.ttc`의 Noto Serif CJK KR 서체
+  (`TTC index 1`, 가변 축 200–900, 기본 굵기 400/600/700)
 - 업데이트 저장소 설정: `AppReleaseConfig.java`
 - 정식 APK 빌드: `.github/workflows/android-release.yml`
 - 업데이트 검증: APK 크기, SHA-256, 패키지 ID, 증가한 `versionCode`, 동일 서명
@@ -19,7 +20,7 @@
 
 원본 `ivLis-Studio/ivLyrics-Android`를 병합할 때 위 항목에 충돌이 생기면 이
 포크의 값을 유지한다. 새 원본 기능을 반영하되 업데이트 URL을 원본 저장소로
-되돌리거나 Noto Serif KR 파일을 Pretendard로 덮어쓰지 않는다.
+되돌리거나 Noto Serif CJK 가변 TTC를 다른 폰트로 덮어쓰지 않는다.
 
 ## 충돌 없는 인앱 업데이트 규칙
 
