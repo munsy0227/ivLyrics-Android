@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 TEMPLATE_PATH = Path(".github/release-notes-template.md")
+MAX_RELEASE_NOTES_CHARS = 120_000
 
 
 def run_git(args, allow_fail=False):
@@ -157,15 +158,39 @@ def commit_evidence(commits):
     return "\n\n".join(blocks)
 
 
-def read_gradle_version():
-    gradle = Path("app/build.gradle")
-    text = gradle.read_text(encoding="utf-8") if gradle.exists() else ""
+def parse_gradle_version(text):
     code_match = re.search(r"versionCode\s+([0-9]+)", text)
     name_match = re.search(r'versionName\s+"([^"]+)"', text)
     return {
         "versionCode": int(code_match.group(1)) if code_match else None,
         "versionName": name_match.group(1) if name_match else "",
     }
+
+
+def read_gradle_version():
+    gradle = Path("app/build.gradle")
+    text = gradle.read_text(encoding="utf-8") if gradle.exists() else ""
+    return parse_gradle_version(text)
+
+
+def gradle_version_at(ref):
+    text = run_git(["show", f"{ref}:app/build.gradle"], allow_fail=True)
+    return parse_gradle_version(text)
+
+
+def previous_version_ref(current_ref, current_version_name):
+    if not current_version_name:
+        return ""
+    commits = run_git(
+        ["rev-list", "--first-parent", current_ref],
+        allow_fail=True,
+    ).splitlines()
+    for commit in commits[1:]:
+        version = gradle_version_at(commit)
+        previous_name = version.get("versionName") or ""
+        if previous_name and previous_name != current_version_name:
+            return commit
+    return ""
 
 
 def apk_assets(apk_dir):
@@ -408,6 +433,23 @@ def render_notes(current_tag, previous, version, assets, content):
     )
 
 
+def limit_release_notes(notes):
+    if len(notes) <= MAX_RELEASE_NOTES_CHARS:
+        return notes
+    notice = textwrap.dedent("""
+
+        > GitHub 본문 제한에 맞춰 릴리스 노트가 일부 잘렸습니다. 전체 변경 내역은 Full Changelog 링크에서 확인하세요.
+        >
+        > Release notes were truncated to fit GitHub's body limit. See the Full Changelog link for the complete history.
+    """).rstrip()
+    available = MAX_RELEASE_NOTES_CHARS - len(notice)
+    shortened = notes[:available]
+    last_line = shortened.rfind("\n")
+    if last_line > 0:
+        shortened = shortened[:last_line]
+    return shortened.rstrip() + notice
+
+
 def normalize_chat_url(base_url):
     base = (base_url or "").strip().rstrip("/")
     if not base:
@@ -637,28 +679,39 @@ def main():
     current_sha = resolve_commit(current_tag)
     previous = previous_tag(current_tag)
     current_ref = resolve_range_ref(current_tag)
-    range_spec = commit_range(previous, current_ref)
+    version = read_gradle_version()
+    comparison_base = previous or previous_version_ref(
+        current_ref,
+        version.get("versionName") or "",
+    )
+    range_spec = commit_range(comparison_base, current_ref)
     stat_text = git_diff_stat(range_spec)
     commits = release_commits(range_spec, current_ref)
-    version = read_gradle_version()
     assets = apk_assets(os.environ.get("APK_DIR", "release-apks"))
 
     content = ai_release_content(
-        current_tag, previous, version, commits, stat_text, assets
+        current_tag, comparison_base, version, commits, stat_text, assets
     )
     if not content:
         content = fallback_content(current_tag, commits)
-    notes = render_notes(current_tag, previous, version, assets, content)
+    notes = limit_release_notes(
+        render_notes(
+            current_tag,
+            comparison_base,
+            version,
+            assets,
+            content,
+        )
+    )
 
     metadata = {
         "tag": current_tag,
         "commit": current_sha,
         "previousTag": previous,
+        "comparisonBase": comparison_base,
         "versionName": version.get("versionName"),
         "versionCode": version.get("versionCode"),
-        "compareUrl": (
-            compare_url(current_tag, previous)
-        ),
+        "compareUrl": compare_url(current_tag, comparison_base),
         "apks": assets,
         "commitCount": len(commits),
         "coveredCommits": [commit["hash"] for commit in commits],
@@ -672,6 +725,7 @@ def main():
         encoding="utf-8",
     )
     print(f"previous_tag={previous}")
+    print(f"comparison_base={comparison_base}")
     print(f"notes={out_dir / 'release-notes.md'}")
     print(f"version_file={out_dir / f'ivLyrics-Android-{current_tag}-version.json'}")
 

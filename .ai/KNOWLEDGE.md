@@ -17,6 +17,8 @@
 - 정식 APK 빌드: `.github/workflows/android-release.yml`
 - 업데이트 검증: APK 크기, SHA-256, 패키지 ID, 증가한 `versionCode`, 동일 서명
   인증서를 모두 검사한다. 이 검증을 약화하거나 제거하지 않는다.
+- 정식 서명 인증서 SHA-256:
+  `C7:13:45:8C:60:2E:39:9F:D5:9A:23:D9:F4:EB:87:DA:32:7C:14:8B:8E:2E:92:97:B6:F7:9F:F1:57:B6:41:35`
 
 원본 `ivLis-Studio/ivLyrics-Android`를 병합할 때 위 항목에 충돌이 생기면 이
 포크의 값을 유지한다. 새 원본 기능을 반영하되 업데이트 URL을 원본 저장소로
@@ -69,7 +71,10 @@ Android는 서명이 다른 APK로 기존 앱을 덮어쓸 수 없다. 과거 �
 
 릴리스 Actions는 태그와 `versionName`이 다르면 실패하도록 설계돼 있다. Discord
 Webhook과 AI 릴리스 노트 Secrets는 선택 사항이며 없어도 정식 릴리스가 성공해야
-한다.
+한다. 이전 태그가 없는 첫 릴리스는 Git 기록에서 직전 `versionName`의 커밋을
+찾아 비교 기준으로 사용한다. 릴리스 노트는 GitHub 본문 제한보다 작은 120,000자로
+제한한다. Actions의 `apksigner` 검증과 위 인증서 SHA-256 일치 검사를 통과하지
+못한 APK는 게시하지 않는다.
 
 ## 변경 후 검증
 

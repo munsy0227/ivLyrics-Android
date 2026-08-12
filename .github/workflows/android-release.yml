@@ -21,6 +21,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  EXPECTED_SIGNER_SHA256: "c713458c602e399fd59a23d9f4eb87da327c148b8e2e9297b6f79ff157b64135"
 
 jobs:
   build-release:
@@ -91,6 +92,47 @@ jobs:
 
       - name: Build release APK
         run: ./gradlew :app:assembleRelease
+
+      - name: Verify release APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          apksigner_candidates=("${ANDROID_SDK_ROOT}"/build-tools/*/apksigner)
+          if [[ "${#apksigner_candidates[@]}" -eq 0 ]]; then
+            echo "::error::Android APK Signer was not found"
+            exit 1
+          fi
+          apksigner="$(printf '%s\n' "${apksigner_candidates[@]}" | sort -V | tail -n 1)"
+
+          release_apks=(app/build/outputs/apk/release/*.apk)
+          if [[ "${#release_apks[@]}" -eq 0 ]]; then
+            echo "::error::No release APK was found for signature verification"
+            exit 1
+          fi
+
+          for apk in "${release_apks[@]}"; do
+            verification="$("${apksigner}" verify --verbose --print-certs "${apk}")"
+            printf '%s\n' "${verification}"
+            signer_sha256="$(
+              printf '%s\n' "${verification}" \
+                | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
+                | head -n 1 \
+                | tr -d '[:space:]:' \
+                | tr '[:upper:]' '[:lower:]'
+            )"
+            if [[ -z "${signer_sha256}" ]]; then
+              echo "::error file=${apk}::Signer SHA-256 fingerprint was not found"
+              exit 1
+            fi
+            if [[ "${signer_sha256}" != "${EXPECTED_SIGNER_SHA256}" ]]; then
+              echo "::error file=${apk}::Unexpected release signer certificate"
+              echo "Expected SHA-256: ${EXPECTED_SIGNER_SHA256}"
+              echo "Actual SHA-256:   ${signer_sha256}"
+              exit 1
+            fi
+          done
 
       - name: Verify release permission profile
         shell: bash
