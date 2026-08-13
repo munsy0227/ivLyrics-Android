@@ -37,7 +37,7 @@ final class AiLyricsRepository {
     private static final int CONNECT_TIMEOUT_MS = 12_000;
     private static final int READ_TIMEOUT_MS = 70_000;
     private static final long STREAM_PARTIAL_DISPATCH_INTERVAL_MS = 600L;
-    private static final String SUPPLEMENT_PROMPT_VERSION = "v5-contextual-fidelity-ai-only";
+    private static final String SUPPLEMENT_PROMPT_VERSION = "v6-system-natural-ai-only";
     private static final String TMI_PROMPT_VERSION = ResearchDocument.OUTPUT_VERSION;
     private static final String CULTURAL_ANNOTATION_PROMPT_VERSION = "cultural-v4";
     private static final int MAX_LYRICS_MEMORY_ENTRIES = 250;
@@ -426,6 +426,24 @@ final class AiLyricsRepository {
 
     private interface SseDataHandler {
         String onEvent(String eventName, String data) throws Exception;
+    }
+
+    private static final class ProviderPrompt {
+        final String systemPrompt;
+        final String userPrompt;
+
+        ProviderPrompt(String systemPrompt, String userPrompt) {
+            this.systemPrompt = systemPrompt == null ? "" : systemPrompt.trim();
+            this.userPrompt = userPrompt == null ? "" : userPrompt;
+        }
+
+        static ProviderPrompt userOnly(String prompt) {
+            return new ProviderPrompt("", prompt);
+        }
+
+        boolean hasSystemPrompt() {
+            return !systemPrompt.isEmpty();
+        }
     }
 
     private static final class SupplementRequest {
@@ -1593,9 +1611,9 @@ final class AiLyricsRepository {
             int expectedLineCount = requests.size();
             boolean pronunciation = SUPPLEMENT_TASK_PRONUNCIATION.equals(task);
             List<String> values;
-            String prompt;
+            ProviderPrompt prompt;
             if (pronunciation) {
-                prompt = buildPhoneticPrompt(requests, pronunciationLang);
+                prompt = ProviderPrompt.userOnly(buildPhoneticPrompt(requests, pronunciationLang));
                 log.write("ai pronunciation stream request: lines=" + expectedLineCount + " / pronunciation=" + pronunciationLang);
                 values = null;
                 Exception lastError = null;
@@ -1756,7 +1774,7 @@ final class AiLyricsRepository {
     }
 
     private List<String> loadSupplementValuesStreamFirst(
-            String prompt,
+            ProviderPrompt prompt,
             AiLyricsSettings.Snapshot settings,
             List<SupplementRequest> requests,
             String taskName,
@@ -2017,7 +2035,7 @@ final class AiLyricsRepository {
     }
 
     private String callProviderStreamRaw(
-            String prompt,
+            ProviderPrompt prompt,
             AiLyricsSettings.Snapshot settings,
             TextDeltaSink sink
     ) throws Exception {
@@ -2137,7 +2155,7 @@ final class AiLyricsRepository {
     }
 
     private String callProviderStreamRawOnce(
-            String prompt,
+            ProviderPrompt prompt,
             AiLyricsSettings.Snapshot settings,
             String apiKey,
             TextDeltaSink sink
@@ -2153,6 +2171,10 @@ final class AiLyricsRepository {
     }
 
     private String callProviderRaw(String prompt, AiLyricsSettings.Snapshot settings) throws Exception {
+        return callProviderRaw(ProviderPrompt.userOnly(prompt), settings);
+    }
+
+    private String callProviderRaw(ProviderPrompt prompt, AiLyricsSettings.Snapshot settings) throws Exception {
         PaxsenixAiModels.requireSelectedModel(settings == null ? "" : settings.model);
         List<String> apiKeys = providerApiKeys(settings);
         if (apiKeys.isEmpty()) {
@@ -2188,7 +2210,11 @@ final class AiLyricsRepository {
         throw lastError == null ? new IOException("AI 제공자 요청 실패") : lastError;
     }
 
-    private String callProviderRawOnce(String prompt, AiLyricsSettings.Snapshot settings, String apiKey) throws Exception {
+    private String callProviderRawOnce(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey
+    ) throws Exception {
         String providerId = settings.provider.id;
         if ("gemini".equals(providerId)) {
             return callGemini(prompt, settings, apiKey);
@@ -2205,7 +2231,16 @@ final class AiLyricsRepository {
             String apiKey,
             TextDeltaSink sink
     ) throws Exception {
-        return callGeminiStream(prompt, settings, apiKey, sink, false);
+        return callGeminiStream(ProviderPrompt.userOnly(prompt), settings, apiKey, sink, false, settings.maxTokens);
+    }
+
+    private String callGeminiStream(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey,
+            TextDeltaSink sink
+    ) throws Exception {
+        return callGeminiStream(prompt, settings, apiKey, sink, false, settings.maxTokens);
     }
 
     private String callGeminiStream(
@@ -2215,11 +2250,36 @@ final class AiLyricsRepository {
             TextDeltaSink sink,
             boolean webSearch
     ) throws Exception {
-        return callGeminiStream(prompt, settings, apiKey, sink, webSearch, settings.maxTokens);
+        return callGeminiStream(
+                ProviderPrompt.userOnly(prompt),
+                settings,
+                apiKey,
+                sink,
+                webSearch,
+                settings.maxTokens
+        );
     }
 
     private String callGeminiStream(
             String prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey,
+            TextDeltaSink sink,
+            boolean webSearch,
+            int maxTokens
+    ) throws Exception {
+        return callGeminiStream(
+                ProviderPrompt.userOnly(prompt),
+                settings,
+                apiKey,
+                sink,
+                webSearch,
+                maxTokens
+        );
+    }
+
+    private String callGeminiStream(
+            ProviderPrompt prompt,
             AiLyricsSettings.Snapshot settings,
             String apiKey,
             TextDeltaSink sink,
@@ -2256,7 +2316,11 @@ final class AiLyricsRepository {
         }, sink);
     }
 
-    private String callGemini(String prompt, AiLyricsSettings.Snapshot settings, String apiKey) throws Exception {
+    private String callGemini(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey
+    ) throws Exception {
         String endpoint = trimRight(settings.baseUrl, "/")
                 + "/models/" + urlPath(settings.model)
                 + ":generateContent?key=" + urlQuery(apiKey);
@@ -2286,17 +2350,25 @@ final class AiLyricsRepository {
         return raw;
     }
 
-    private JSONObject geminiBody(String prompt, AiLyricsSettings.Snapshot settings) throws JSONException {
+    private JSONObject geminiBody(ProviderPrompt prompt, AiLyricsSettings.Snapshot settings) throws JSONException {
         return geminiBody(prompt, settings, settings.maxTokens);
     }
 
-    private JSONObject geminiBody(String prompt, AiLyricsSettings.Snapshot settings, int maxTokens) throws JSONException {
+    private JSONObject geminiBody(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings,
+            int maxTokens
+    ) throws JSONException {
         JSONObject body = new JSONObject();
+        if (prompt.hasSystemPrompt()) {
+            body.put("systemInstruction", new JSONObject()
+                    .put("parts", new JSONArray().put(new JSONObject().put("text", prompt.systemPrompt))));
+        }
         JSONArray contents = new JSONArray();
         JSONObject content = new JSONObject();
         content.put("role", "user");
         JSONArray parts = new JSONArray();
-        parts.put(new JSONObject().put("text", prompt));
+        parts.put(new JSONObject().put("text", prompt.userPrompt));
         content.put("parts", parts);
         contents.put(content);
         body.put("contents", contents);
@@ -2314,7 +2386,16 @@ final class AiLyricsRepository {
             String apiKey,
             TextDeltaSink sink
     ) throws Exception {
-        return callClaudeStream(prompt, settings, apiKey, sink, false);
+        return callClaudeStream(ProviderPrompt.userOnly(prompt), settings, apiKey, sink, false, settings.maxTokens);
+    }
+
+    private String callClaudeStream(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey,
+            TextDeltaSink sink
+    ) throws Exception {
+        return callClaudeStream(prompt, settings, apiKey, sink, false, settings.maxTokens);
     }
 
     private String callClaudeStream(
@@ -2324,11 +2405,36 @@ final class AiLyricsRepository {
             TextDeltaSink sink,
             boolean webSearch
     ) throws Exception {
-        return callClaudeStream(prompt, settings, apiKey, sink, webSearch, settings.maxTokens);
+        return callClaudeStream(
+                ProviderPrompt.userOnly(prompt),
+                settings,
+                apiKey,
+                sink,
+                webSearch,
+                settings.maxTokens
+        );
     }
 
     private String callClaudeStream(
             String prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey,
+            TextDeltaSink sink,
+            boolean webSearch,
+            int maxTokens
+    ) throws Exception {
+        return callClaudeStream(
+                ProviderPrompt.userOnly(prompt),
+                settings,
+                apiKey,
+                sink,
+                webSearch,
+                maxTokens
+        );
+    }
+
+    private String callClaudeStream(
+            ProviderPrompt prompt,
             AiLyricsSettings.Snapshot settings,
             String apiKey,
             TextDeltaSink sink,
@@ -2372,7 +2478,11 @@ final class AiLyricsRepository {
         }, sink);
     }
 
-    private String callClaude(String prompt, AiLyricsSettings.Snapshot settings, String apiKey) throws Exception {
+    private String callClaude(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey
+    ) throws Exception {
         String endpoint = trimRight(settings.baseUrl, "/") + "/messages";
         JSONObject body = claudeBody(prompt, settings);
         Map<String, String> headers = claudeHeaders(apiKey);
@@ -2395,14 +2505,21 @@ final class AiLyricsRepository {
         return raw;
     }
 
-    private JSONObject claudeBody(String prompt, AiLyricsSettings.Snapshot settings) throws JSONException {
+    private JSONObject claudeBody(ProviderPrompt prompt, AiLyricsSettings.Snapshot settings) throws JSONException {
         return claudeBody(prompt, settings, settings.maxTokens);
     }
 
-    private JSONObject claudeBody(String prompt, AiLyricsSettings.Snapshot settings, int maxTokens) throws JSONException {
+    private JSONObject claudeBody(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings,
+            int maxTokens
+    ) throws JSONException {
         JSONObject body = new JSONObject();
         body.put("model", settings.model);
         body.put("max_tokens", maxTokens);
+        if (prompt.hasSystemPrompt()) {
+            body.put("system", prompt.systemPrompt);
+        }
         if (settings.thinkingTokens > 0) {
             if (settings.thinkingTokens < 1_024) {
                 throw new JSONException("Claude thinking tokens must be at least 1,024");
@@ -2419,7 +2536,7 @@ final class AiLyricsRepository {
         JSONArray messages = new JSONArray();
         messages.put(new JSONObject()
                 .put("role", "user")
-                .put("content", prompt));
+                .put("content", prompt.userPrompt));
         body.put("messages", messages);
         return body;
     }
@@ -2438,7 +2555,23 @@ final class AiLyricsRepository {
             String apiKey,
             TextDeltaSink sink
     ) throws Exception {
-        return callOpenAiCompatibleStream(prompt, settings, apiKey, sink, false);
+        return callOpenAiCompatibleStream(
+                ProviderPrompt.userOnly(prompt),
+                settings,
+                apiKey,
+                sink,
+                false,
+                settings.maxTokens
+        );
+    }
+
+    private String callOpenAiCompatibleStream(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey,
+            TextDeltaSink sink
+    ) throws Exception {
+        return callOpenAiCompatibleStream(prompt, settings, apiKey, sink, false, settings.maxTokens);
     }
 
     private String callOpenAiCompatibleStream(
@@ -2448,11 +2581,36 @@ final class AiLyricsRepository {
             TextDeltaSink sink,
             boolean webSearch
     ) throws Exception {
-        return callOpenAiCompatibleStream(prompt, settings, apiKey, sink, webSearch, settings.maxTokens);
+        return callOpenAiCompatibleStream(
+                ProviderPrompt.userOnly(prompt),
+                settings,
+                apiKey,
+                sink,
+                webSearch,
+                settings.maxTokens
+        );
     }
 
     private String callOpenAiCompatibleStream(
             String prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey,
+            TextDeltaSink sink,
+            boolean webSearch,
+            int maxTokens
+    ) throws Exception {
+        return callOpenAiCompatibleStream(
+                ProviderPrompt.userOnly(prompt),
+                settings,
+                apiKey,
+                sink,
+                webSearch,
+                maxTokens
+        );
+    }
+
+    private String callOpenAiCompatibleStream(
+            ProviderPrompt prompt,
             AiLyricsSettings.Snapshot settings,
             String apiKey,
             TextDeltaSink sink,
@@ -2492,7 +2650,11 @@ final class AiLyricsRepository {
         }, sink);
     }
 
-    private String callOpenAiCompatible(String prompt, AiLyricsSettings.Snapshot settings, String apiKey) throws Exception {
+    private String callOpenAiCompatible(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings,
+            String apiKey
+    ) throws Exception {
         String endpoint = openAiEndpoint(settings);
         JSONObject body = openAiCompatibleBody(prompt, settings);
         Map<String, String> headers = openAiCompatibleHeaders(settings, apiKey);
@@ -2681,12 +2843,24 @@ final class AiLyricsRepository {
     }
 
     private JSONObject openAiCompatibleBody(String prompt, AiLyricsSettings.Snapshot settings) throws JSONException {
+        return openAiCompatibleBody(ProviderPrompt.userOnly(prompt), settings);
+    }
+
+    private JSONObject openAiCompatibleBody(
+            ProviderPrompt prompt,
+            AiLyricsSettings.Snapshot settings
+    ) throws JSONException {
         JSONObject body = new JSONObject();
         body.put("model", settings.model);
         JSONArray messages = new JSONArray();
+        if (prompt.hasSystemPrompt()) {
+            messages.put(new JSONObject()
+                    .put("role", "system")
+                    .put("content", prompt.systemPrompt));
+        }
         messages.put(new JSONObject()
                 .put("role", "user")
-                .put("content", prompt));
+                .put("content", prompt.userPrompt));
         body.put("messages", messages);
         body.put(tokenField(settings.provider.id), settings.maxTokens);
         body.put("temperature", settings.temperature);
@@ -3025,17 +3199,12 @@ final class AiLyricsRepository {
         return "HTTP " + statusCode;
     }
 
-    private String buildTranslationPrompt(List<SupplementRequest> requests, String lang) {
+    private ProviderPrompt buildTranslationPrompt(List<SupplementRequest> requests, String lang) {
         AiLyricsSettings.Language langInfo = AiLyricsSettings.languageInfo(lang);
         int lineCount = requests == null ? 0 : requests.size();
-        return "You are a lyrics translator. Translate these " + lineCount
-                + " indexed rows of song lyrics into " + langInfo.name + " (" + langInfo.nativeName + ").\n\n"
-                + "CRITICAL RULES:\n"
-                + "- This is a TRANSLATION task - translate the MEANING of each line\n"
-                + "- Output must be written in " + langInfo.name + " (" + langInfo.nativeName + ") only\n"
-                + "- Do NOT leave translatable lyric text unchanged as a substitute for translation\n"
-                + "- Do NOT output romanization or pronunciation instead of translation\n"
-                + "\nTRANSLATION QUALITY AND FIDELITY:\n"
+        String systemPrompt = "You are the lyrics translation system for ivLyrics.\n\n"
+                + "Translate song lyrics into " + langInfo.name + " (" + langInfo.nativeName + ").\n\n"
+                + "TRANSLATION STYLE:\n"
                 + "Use surrounding lines to determine context, speaker intent, relationships, references, implied meaning, and ambiguity, but use that context only to interpret the current line. Do not import information or meaning from other lines into it.\n\n"
                 + "Translate each line into natural, idiomatic target-language phrasing while faithfully preserving what the line says and how it says it. Preserve its meaning, semantic scope, tone, imagery, metaphors, register, emotional intensity, and relevant ambiguity.\n\n"
                 + "Preserve the speaker’s stance and mode of expression, including tense and aspect where relevant, modality, certainty or uncertainty, wishes, conjecture, commands, questions, exclamations, benefactive or relational nuance, sentence-ending force, and other pragmatic nuances. Do not replace these with a more ordinary construction merely because it is more common in everyday speech.\n\n"
@@ -3049,28 +3218,26 @@ final class AiLyricsRepository {
                 + "Prefer the most natural target-language wording that preserves the original line’s distinctive voice over either rigid word-for-word translation or generic conversational paraphrase. Naturalness should resolve awkwardness, not erase stylistic character.\n\n"
                 + "Never add new meaning, omit meaningful information, resolve intentional ambiguity without sufficient context, explain what the original merely implies, intensify or soften the speaker without reason, or transfer meaning from one lyric line to another.\n\n"
                 + "Distinguish lexical language from non-lexical vocalization. When a sequence functions primarily as a sung sound, vocalization, cry, chant, interjection, or sound effect rather than as a lexical expression, preserve its audible form and expressive function instead of translating it for semantic meaning. Render such sounds using the target language’s most natural phonetic representation, based on their actual pronunciation rather than a mechanical character-by-character transliteration. Preserve meaningful differences in vowel quality, consonants, rhythm, lengthening, repetition, and other audible features. If the sequence genuinely functions as a lexical word or carries contextually relevant semantic meaning, translate that meaning instead; do not assume that phonetic-looking text is automatically non-lexical.\n\n"
-                + "OUTPUT AND ALIGNMENT RULES:\n"
-                + "- Input rows are ID-tagged as L0001, L0002, etc. Treat each ID as an immutable timing anchor\n"
-                + "- Output EXACTLY " + lineCount + " rows, one output row for every input row\n"
-                + "- Preserve every row ID exactly and keep the same order\n"
-                + "- Output format must be: L0001<TAB>translated text\n"
-                + "- Row L000N in the output must translate ONLY row L000N from the input\n"
-                + "- Never merge adjacent rows, even if the sentence continues across rows\n"
-                + "- Never split one row into multiple rows, even if the translation is long\n"
-                + "- Never move a translation to the previous or next row\n"
-                + "- If an input row is a short fragment, translate that fragment on the same ID; do not complete it using neighboring rows\n"
-                + "- If an input row contains \" / \" between simultaneous vocal parts, preserve \" / \" and translate each part separately\n"
-                + "- If an input row is empty or untranslatable, output the same ID followed by a tab and nothing else\n"
-                + "- Keep music symbols and structural section markers like [Chorus] as-is\n"
-                + "- Do NOT add extra row IDs, line numbers, prefixes, or explanations\n"
-                + "- Do NOT use JSON or code blocks\n"
-                + "- Just output the ID-tagged translated rows, nothing else\n\n"
-                + "INPUT_ROWS (tab-separated ID and source text):\n" + buildTaggedPayload(requests) + "\n\n"
-                + "ID alignment example (format only; use the target language above for the real output):\n"
-                + "Input:\nL0001\t生きていることとは\nL0002\t変わり続けることだ\n\n"
-                + "Correct output:\nL0001\t살아 있다는 것은\nL0002\t계속 변해 가는 것이다\n\n"
-                + "Wrong output:\nL0001\t살아 있다는 것은 계속 변해 가는 것이다\nL0002\t\n\n"
-                + "OUTPUT_ROWS (" + lineCount + " rows, same IDs, tab-separated):";
+                + "CRITICAL OUTPUT CONTRACT:\n"
+                + "- This is a translation task. Translate the meaning of every non-empty lyric row.\n"
+                + "- Write the translated lyrics in " + langInfo.name + " (" + langInfo.nativeName + ") only.\n"
+                + "- Never return translatable lyrics unchanged, romanization, or pronunciation instead of a translation.\n"
+                + "- Return exactly " + lineCount + " ID-tagged rows, one output row for each input row in the same order.\n"
+                + "- Preserve every L0001-style row ID exactly. Use the format L0001<TAB>translated text.\n"
+                + "- Never merge multiple input rows or split one input row into multiple output rows.\n"
+                + "- You may use surrounding rows to understand context; the output carrying an ID must still represent the input carrying that same ID.\n"
+                + "- Preserve \" / \" between simultaneous vocal parts and translate each part separately.\n"
+                + "- Preserve empty rows as the same ID followed by a tab and no translated text.\n"
+                + "- Preserve music symbols and structural markers such as ♪ and [Chorus].\n"
+                + "- Do not add extra IDs, line numbers, prefixes, explanations, JSON, Markdown, or code fences.\n"
+                + "- Return only the ID-tagged translated lyric rows.";
+
+        String userPrompt = "Translate the following " + lineCount
+                + " indexed lyric rows. Return exactly " + lineCount + " ID-tagged rows and nothing else.\n\n"
+                + "<lyrics>\n"
+                + buildTaggedPayload(requests) + "\n"
+                + "</lyrics>";
+        return new ProviderPrompt(systemPrompt, userPrompt);
     }
 
     private String buildMetadataTranslationPrompt(String title, String artist, String lang) {
