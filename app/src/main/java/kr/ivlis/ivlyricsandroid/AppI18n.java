@@ -134,6 +134,7 @@ final class AppI18n {
         addCulturalAnnotationStrings(languages);
         addKeylessTranslationProviderStrings(languages);
         addAiProviderOrderStrings(languages);
+        addThinkingTokenStrings(languages);
         addFirstLanguagePromptStrings(languages);
         ResearchI18n.apply(languages);
         addSettingsTranslationOverrides(languages);
@@ -441,6 +442,48 @@ final class AppI18n {
             copy.put(entries[index], entries[index + 1]);
         }
         languages.put(languageCode, Collections.unmodifiableMap(copy));
+    }
+
+    private static void addThinkingTokenStrings(Map<String, Map<String, String>> languages) {
+        for (AiLyricsSettings.Language language : UI_LANGUAGES) {
+            Map<String, String> table = languages.get(language.code);
+            if (table == null) {
+                continue;
+            }
+            String[] values = thinkingTokenStrings(language.code);
+            Map<String, String> copy = new LinkedHashMap<>(table);
+            copy.put("field.thinking_tokens", values[0]);
+            copy.put("field.thinking_tokens_desc", values[1]);
+            languages.put(language.code, Collections.unmodifiableMap(copy));
+        }
+    }
+
+    private static String[] thinkingTokenStrings(String languageCode) {
+        switch (languageCode) {
+            case "ko": return new String[]{"사고 토큰", "0이면 끕니다. 숫자형 사고 예산을 지원하는 Gemini·Claude·OpenRouter 모델에만 적용됩니다. Claude에서는 1,024 이상이고 최대 토큰보다 작아야 합니다."};
+            case "zh-CN": return new String[]{"思考令牌", "设为 0 可关闭。仅适用于支持数字思考预算的 Gemini、Claude 和 OpenRouter 模型。Claude 要求至少为 1,024 且小于最大令牌数。"};
+            case "zh-TW": return new String[]{"思考權杖", "設為 0 可關閉。僅適用於支援數字思考預算的 Gemini、Claude 和 OpenRouter 模型。Claude 要求至少為 1,024 且小於最大權杖數。"};
+            case "ja": return new String[]{"思考トークン", "0で無効になります。数値の思考予算に対応する Gemini、Claude、OpenRouter モデルにのみ適用されます。Claude では1,024以上かつ最大トークン未満にしてください。"};
+            case "hi": return new String[]{"विचार टोकन", "0 पर बंद रहता है। यह केवल संख्यात्मक विचार बजट समर्थित Gemini, Claude और OpenRouter मॉडल पर लागू होता है। Claude में मान कम से कम 1,024 और अधिकतम टोकन से कम होना चाहिए।"};
+            case "es": return new String[]{"Tokens de razonamiento", "0 lo desactiva. Solo se aplica a modelos de Gemini, Claude y OpenRouter que admitan un presupuesto numérico. En Claude debe ser al menos 1.024 y menor que el máximo de tokens."};
+            case "fr": return new String[]{"Jetons de réflexion", "0 désactive cette option. Elle ne s’applique qu’aux modèles Gemini, Claude et OpenRouter acceptant un budget numérique. Pour Claude, la valeur doit être au moins 1 024 et inférieure au maximum de jetons."};
+            case "ar": return new String[]{"رموز التفكير", "القيمة 0 تعطّلها. تُطبّق فقط على نماذج Gemini وClaude وOpenRouter التي تدعم ميزانية تفكير رقمية. في Claude يجب ألا تقل عن 1,024 وأن تكون أقل من الحد الأقصى للرموز."};
+            case "fa": return new String[]{"توکن‌های تفکر", "مقدار ۰ آن را غیرفعال می‌کند. فقط برای مدل‌های Gemini، Claude وOpenRouter با پشتیبانی از بودجه عددی تفکر اعمال می‌شود. در Claude باید حداقل ۱٬۰۲۴ و کمتر از حداکثر توکن باشد."};
+            case "de": return new String[]{"Denk-Tokens", "0 deaktiviert die Einstellung. Sie gilt nur für Gemini-, Claude- und OpenRouter-Modelle mit numerischem Denkbudget. Bei Claude muss der Wert mindestens 1.024 und kleiner als die maximale Tokenzahl sein."};
+            case "ru": return new String[]{"Токены рассуждения", "0 отключает настройку. Она применяется только к моделям Gemini, Claude и OpenRouter с числовым бюджетом рассуждений. Для Claude значение должно быть не меньше 1 024 и меньше максимума токенов."};
+            case "sv": return new String[]{"Resonemangstoken", "0 stänger av inställningen. Den gäller bara Gemini-, Claude- och OpenRouter-modeller med numerisk resonemangsbudget. För Claude måste värdet vara minst 1 024 och lägre än maximalt antal token."};
+            case "pt": return new String[]{"Tokens de raciocínio", "0 desativa a opção. Aplica-se apenas a modelos Gemini, Claude e OpenRouter compatíveis com orçamento numérico. No Claude, deve ser no mínimo 1.024 e menor que o máximo de tokens."};
+            case "bn": return new String[]{"চিন্তার টোকেন", "0 দিলে এটি বন্ধ থাকে। সংখ্যাভিত্তিক চিন্তার বাজেট সমর্থনকারী Gemini, Claude ও OpenRouter মডেলেই এটি প্রযোজ্য। Claude-এ মান কমপক্ষে 1,024 এবং সর্বোচ্চ টোকেনের চেয়ে কম হতে হবে।"};
+            case "cs": return new String[]{"Tokeny uvažování", "Hodnota 0 nastavení vypne. Platí jen pro modely Gemini, Claude a OpenRouter s číselným rozpočtem uvažování. U Claude musí být hodnota alespoň 1 024 a menší než maximum tokenů."};
+            case "it": return new String[]{"Token di ragionamento", "0 disattiva l’opzione. Si applica solo ai modelli Gemini, Claude e OpenRouter che supportano un budget numerico. In Claude deve essere almeno 1.024 e inferiore al massimo di token."};
+            case "th": return new String[]{"โทเค็นการคิด", "ค่า 0 จะปิดการตั้งค่านี้ ใช้ได้เฉพาะโมเดล Gemini, Claude และ OpenRouter ที่รองรับงบการคิดแบบตัวเลข สำหรับ Claude ค่าต้องไม่น้อยกว่า 1,024 และน้อยกว่าโทเค็นสูงสุด"};
+            case "vi": return new String[]{"Token suy luận", "Đặt 0 để tắt. Chỉ áp dụng cho các mô hình Gemini, Claude và OpenRouter hỗ trợ ngân sách suy luận dạng số. Với Claude, giá trị phải từ 1.024 trở lên và nhỏ hơn số token tối đa."};
+            case "id": return new String[]{"Token penalaran", "Nilai 0 menonaktifkannya. Hanya berlaku untuk model Gemini, Claude, dan OpenRouter yang mendukung anggaran numerik. Pada Claude nilainya harus minimal 1.024 dan lebih kecil dari token maksimum."};
+            case "ms": return new String[]{"Token penaakulan", "Nilai 0 mematikannya. Hanya digunakan untuk model Gemini, Claude dan OpenRouter yang menyokong bajet angka. Pada Claude nilainya mestilah sekurang-kurangnya 1,024 dan kurang daripada token maksimum."};
+            case "tr": return new String[]{"Düşünme tokenları", "0 değeri ayarı kapatır. Yalnızca sayısal düşünme bütçesini destekleyen Gemini, Claude ve OpenRouter modellerine uygulanır. Claude için değer en az 1.024 ve maksimum token sayısından küçük olmalıdır."};
+            case "en":
+            default: return new String[]{"Thinking tokens", "0 disables it. Applies only to Gemini, Claude, and OpenRouter models that support a numeric thinking budget. Claude requires at least 1,024 and less than max tokens."};
+        }
     }
 
     private static void addFirstLanguagePromptStrings(Map<String, Map<String, String>> languages) {

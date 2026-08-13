@@ -388,7 +388,9 @@ public final class MainActivity extends Activity implements
     private TextView paxsenixModelPickerButton;
     private EditText baseUrlInput;
     private EditText maxTokensInput;
+    private EditText thinkingTokensInput;
     private EditText temperatureInput;
+    private View thinkingTokensGroup;
     private TextView backgroundSolidColorValueView;
     private TextView lyricsBackgroundSolidColorValueView;
     private View backgroundSolidColorSwatch;
@@ -4695,6 +4697,14 @@ public final class MainActivity extends Activity implements
         tempParams.leftMargin = dp(10);
         advancedRow.addView(settingField(ui("field.temperature"), "", temperatureInput), tempParams);
         settingsAiPage.addView(advancedRow, topMargin(matchWrap(), dp(12)));
+
+        thinkingTokensInput = settingEditText("", false, false);
+        thinkingTokensGroup = settingField(
+                ui("field.thinking_tokens"),
+                ui("field.thinking_tokens_desc"),
+                thinkingTokensInput
+        );
+        settingsAiPage.addView(thinkingTokensGroup, topMargin(matchWrap(), dp(12)));
 
         LinearLayout actionRow = new LinearLayout(this);
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -10027,6 +10037,14 @@ public final class MainActivity extends Activity implements
         if (maxTokensInput != null) {
             maxTokensInput.setText(String.valueOf(snapshot.maxTokens));
         }
+        if (thinkingTokensInput != null) {
+            thinkingTokensInput.setText(String.valueOf(snapshot.thinkingTokens));
+        }
+        if (thinkingTokensGroup != null) {
+            thinkingTokensGroup.setVisibility(
+                    AiLyricsSettings.supportsThinkingTokens(snapshot.provider.id) ? View.VISIBLE : View.GONE
+            );
+        }
         if (temperatureInput != null) {
             temperatureInput.setText(String.format(Locale.ROOT, "%.2f", snapshot.temperature));
         }
@@ -10184,6 +10202,7 @@ public final class MainActivity extends Activity implements
                 textOf(baseUrlInput),
                 textOf(modelInput),
                 parseInt(textOf(maxTokensInput), 16000),
+                parseInt(textOf(thinkingTokensInput), 0),
                 parseFloat(textOf(temperatureInput), 0.3f)
         );
         applyBackgroundSettings(aiLyricsSettings.snapshot());

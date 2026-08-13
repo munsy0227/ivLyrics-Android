@@ -37,7 +37,7 @@ final class AiLyricsRepository {
     private static final int CONNECT_TIMEOUT_MS = 12_000;
     private static final int READ_TIMEOUT_MS = 70_000;
     private static final long STREAM_PARTIAL_DISPATCH_INTERVAL_MS = 600L;
-    private static final String SUPPLEMENT_PROMPT_VERSION = "v4-id-aligned-ai-only";
+    private static final String SUPPLEMENT_PROMPT_VERSION = "v5-contextual-fidelity-ai-only";
     private static final String TMI_PROMPT_VERSION = ResearchDocument.OUTPUT_VERSION;
     private static final String CULTURAL_ANNOTATION_PROMPT_VERSION = "cultural-v4";
     private static final int MAX_LYRICS_MEMORY_ENTRIES = 250;
@@ -1338,6 +1338,7 @@ final class AiLyricsRepository {
                 + "|model=" + settings.model
                 + "|url=" + settings.baseUrl
                 + "|tok=" + settings.maxTokens
+                + "|thinking=" + settings.thinkingTokens
                 + "|temp=" + settings.temperature
                 + "|text=" + sha256(title + "\n" + artist + "\n" + researchLyricsFingerprint(lyrics));
 
@@ -1465,6 +1466,8 @@ final class AiLyricsRepository {
                 + "|provider=" + settings.provider.id
                 + "|model=" + settings.model
                 + "|url=" + settings.baseUrl
+                + "|tok=" + settings.maxTokens
+                + "|thinking=" + settings.thinkingTokens
                 + "|temp=" + settings.temperature
                 + "|text=" + sha256(payload);
 
@@ -1922,6 +1925,7 @@ final class AiLyricsRepository {
                 + "|model=" + settings.model
                 + "|url=" + settings.baseUrl
                 + "|tok=" + settings.maxTokens
+                + "|thinking=" + settings.thinkingTokens
                 + "|temp=" + settings.temperature
                 + "|output=" + outputLang
                 + "|text=" + sha256(textPayload);
@@ -2299,7 +2303,7 @@ final class AiLyricsRepository {
         JSONObject config = new JSONObject();
         config.put("maxOutputTokens", maxTokens);
         config.put("temperature", settings.temperature);
-        config.put("thinkingConfig", new JSONObject().put("thinkingBudget", 0));
+        config.put("thinkingConfig", new JSONObject().put("thinkingBudget", settings.thinkingTokens));
         body.put("generationConfig", config);
         return body;
     }
@@ -2399,7 +2403,19 @@ final class AiLyricsRepository {
         JSONObject body = new JSONObject();
         body.put("model", settings.model);
         body.put("max_tokens", maxTokens);
-        body.put("temperature", settings.temperature);
+        if (settings.thinkingTokens > 0) {
+            if (settings.thinkingTokens < 1_024) {
+                throw new JSONException("Claude thinking tokens must be at least 1,024");
+            }
+            if (settings.thinkingTokens >= maxTokens) {
+                throw new JSONException("Claude thinking tokens must be less than max tokens");
+            }
+            body.put("thinking", new JSONObject()
+                    .put("type", "enabled")
+                    .put("budget_tokens", settings.thinkingTokens));
+        } else {
+            body.put("temperature", settings.temperature);
+        }
         JSONArray messages = new JSONArray();
         messages.put(new JSONObject()
                 .put("role", "user")
@@ -2674,6 +2690,9 @@ final class AiLyricsRepository {
         body.put("messages", messages);
         body.put(tokenField(settings.provider.id), settings.maxTokens);
         body.put("temperature", settings.temperature);
+        if ("openrouter".equals(settings.provider.id) && settings.thinkingTokens > 0) {
+            body.put("reasoning", new JSONObject().put("max_tokens", settings.thinkingTokens));
+        }
         return body;
     }
 
@@ -3014,8 +3033,23 @@ final class AiLyricsRepository {
                 + "CRITICAL RULES:\n"
                 + "- This is a TRANSLATION task - translate the MEANING of each line\n"
                 + "- Output must be written in " + langInfo.name + " (" + langInfo.nativeName + ") only\n"
-                + "- Do NOT output the original lyrics unchanged\n"
+                + "- Do NOT leave translatable lyric text unchanged as a substitute for translation\n"
                 + "- Do NOT output romanization or pronunciation instead of translation\n"
+                + "\nTRANSLATION QUALITY AND FIDELITY:\n"
+                + "Use surrounding lines to determine context, speaker intent, relationships, references, implied meaning, and ambiguity, but use that context only to interpret the current line. Do not import information or meaning from other lines into it.\n\n"
+                + "Translate each line into natural, idiomatic target-language phrasing while faithfully preserving what the line says and how it says it. Preserve its meaning, semantic scope, tone, imagery, metaphors, register, emotional intensity, and relevant ambiguity.\n\n"
+                + "Preserve the speaker’s stance and mode of expression, including tense and aspect where relevant, modality, certainty or uncertainty, wishes, conjecture, commands, questions, exclamations, benefactive or relational nuance, sentence-ending force, and other pragmatic nuances. Do not replace these with a more ordinary construction merely because it is more common in everyday speech.\n\n"
+                + "Preserve the markedness of the original. If the original sounds poetic, lyrical, old-fashioned, childlike, playful, dramatic, wistful, blunt, rough, formal, intimate, narrative, or deliberately unusual, choose target-language phrasing that naturally carries a comparable effect. “Natural” means natural for the song’s speaker, context, genre, and lyrical style, not necessarily neutral modern conversational language. Do not flatten distinctive or song-like expression into generic everyday speech.\n\n"
+                + "Preserve deliberate repetition and parallelism. When the original repeats the same word, phrase, grammatical construction, sentence ending, or refrain, normally preserve that repetition consistently in the translation. Do not introduce synonyms or alternate endings merely to avoid repetition or create stylistic variety. Recurring key words, images, motifs, and hooks should normally receive consistent translations unless the context clearly changes their meaning or function.\n\n"
+                + "Preserve rhetorical form and intentional irregularity. Do not unnecessarily turn fragments into complete sentences, questions into statements, indirect expressions into explicit ones, or unusual syntax into ordinary prose. Rephrase or reorder elements within the line when needed for idiomatic target-language grammar, but preserve the original communicative and expressive function.\n\n"
+                + "Do not over-interpret ellipsis or implication. Supply an omitted subject, object, pronoun, gender, number, relationship, cause, or other unstated information only when the target language requires it and the context makes it sufficiently clear. Otherwise preserve the original degree of omission or ambiguity. Never make an ambiguous line more specific merely because one interpretation seems likely.\n\n"
+                + "Preserve differences in strength and certainty. Do not strengthen or weaken emotion, politeness, vulgarity, intimacy, agency, obligation, possibility, probability, negation, emphasis, or certainty unless the target language requires an adjustment to express the same pragmatic force.\n\n"
+                + "Preserve imagery and figurative language whenever it remains understandable in the target language. Do not replace a metaphor, image, or poetic expression with an explanatory paraphrase simply to make its meaning more explicit. For idioms or expressions that would become unnatural or misleading if translated literally, use an idiomatic target-language expression that preserves their meaning, tone, and function rather than their surface wording.\n\n"
+                + "Do not unnecessarily domesticate cultural references, names, objects, or images. Preserve them when they are meaningful to the song rather than replacing them with more familiar target-culture equivalents merely for convenience.\n\n"
+                + "Prefer the most natural target-language wording that preserves the original line’s distinctive voice over either rigid word-for-word translation or generic conversational paraphrase. Naturalness should resolve awkwardness, not erase stylistic character.\n\n"
+                + "Never add new meaning, omit meaningful information, resolve intentional ambiguity without sufficient context, explain what the original merely implies, intensify or soften the speaker without reason, or transfer meaning from one lyric line to another.\n\n"
+                + "Distinguish lexical language from non-lexical vocalization. When a sequence functions primarily as a sung sound, vocalization, cry, chant, interjection, or sound effect rather than as a lexical expression, preserve its audible form and expressive function instead of translating it for semantic meaning. Render such sounds using the target language’s most natural phonetic representation, based on their actual pronunciation rather than a mechanical character-by-character transliteration. Preserve meaningful differences in vowel quality, consonants, rhythm, lengthening, repetition, and other audible features. If the sequence genuinely functions as a lexical word or carries contextually relevant semantic meaning, translate that meaning instead; do not assume that phonetic-looking text is automatically non-lexical.\n\n"
+                + "OUTPUT AND ALIGNMENT RULES:\n"
                 + "- Input rows are ID-tagged as L0001, L0002, etc. Treat each ID as an immutable timing anchor\n"
                 + "- Output EXACTLY " + lineCount + " rows, one output row for every input row\n"
                 + "- Preserve every row ID exactly and keep the same order\n"
@@ -3027,7 +3061,7 @@ final class AiLyricsRepository {
                 + "- If an input row is a short fragment, translate that fragment on the same ID; do not complete it using neighboring rows\n"
                 + "- If an input row contains \" / \" between simultaneous vocal parts, preserve \" / \" and translate each part separately\n"
                 + "- If an input row is empty or untranslatable, output the same ID followed by a tab and nothing else\n"
-                + "- Keep music symbols and markers like [Chorus], (Yeah) as-is\n"
+                + "- Keep music symbols and structural section markers like [Chorus] as-is\n"
                 + "- Do NOT add extra row IDs, line numbers, prefixes, or explanations\n"
                 + "- Do NOT use JSON or code blocks\n"
                 + "- Just output the ID-tagged translated rows, nothing else\n\n"
