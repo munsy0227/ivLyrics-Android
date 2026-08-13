@@ -1357,7 +1357,6 @@ final class AiLyricsRepository {
                 + "|url=" + settings.baseUrl
                 + "|tok=" + settings.maxTokens
                 + "|thinking=" + settings.thinkingTokens
-                + "|temp=" + settings.temperature
                 + "|text=" + sha256(title + "\n" + artist + "\n" + researchLyricsFingerprint(lyrics));
 
         if (!bypassCache) {
@@ -1486,7 +1485,6 @@ final class AiLyricsRepository {
                 + "|url=" + settings.baseUrl
                 + "|tok=" + settings.maxTokens
                 + "|thinking=" + settings.thinkingTokens
-                + "|temp=" + settings.temperature
                 + "|text=" + sha256(payload);
 
         if (!bypassCache) {
@@ -1944,7 +1942,6 @@ final class AiLyricsRepository {
                 + "|url=" + settings.baseUrl
                 + "|tok=" + settings.maxTokens
                 + "|thinking=" + settings.thinkingTokens
-                + "|temp=" + settings.temperature
                 + "|output=" + outputLang
                 + "|text=" + sha256(textPayload);
     }
@@ -2374,7 +2371,6 @@ final class AiLyricsRepository {
         body.put("contents", contents);
         JSONObject config = new JSONObject();
         config.put("maxOutputTokens", maxTokens);
-        config.put("temperature", settings.temperature);
         config.put("thinkingConfig", new JSONObject().put("thinkingBudget", settings.thinkingTokens));
         body.put("generationConfig", config);
         return body;
@@ -2530,8 +2526,6 @@ final class AiLyricsRepository {
             body.put("thinking", new JSONObject()
                     .put("type", "enabled")
                     .put("budget_tokens", settings.thinkingTokens));
-        } else {
-            body.put("temperature", settings.temperature);
         }
         JSONArray messages = new JSONArray();
         messages.put(new JSONObject()
@@ -2684,7 +2678,6 @@ final class AiLyricsRepository {
                 .put("model", settings.model)
                 .put("input", prompt)
                 .put("max_output_tokens", settings.maxTokens)
-                .put("temperature", settings.temperature)
                 .put("tools", new JSONArray().put(new JSONObject().put("type", "web_search")))
                 .put("tool_choice", "required")
                 .put("stream", true)
@@ -2863,7 +2856,6 @@ final class AiLyricsRepository {
                 .put("content", prompt.userPrompt));
         body.put("messages", messages);
         body.put(tokenField(settings.provider.id), settings.maxTokens);
-        body.put("temperature", settings.temperature);
         if ("openrouter".equals(settings.provider.id) && settings.thinkingTokens > 0) {
             body.put("reasoning", new JSONObject().put("max_tokens", settings.thinkingTokens));
         }

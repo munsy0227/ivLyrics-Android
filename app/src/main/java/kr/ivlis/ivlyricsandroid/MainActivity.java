@@ -389,7 +389,6 @@ public final class MainActivity extends Activity implements
     private EditText baseUrlInput;
     private EditText maxTokensInput;
     private EditText thinkingTokensInput;
-    private EditText temperatureInput;
     private View thinkingTokensGroup;
     private TextView backgroundSolidColorValueView;
     private TextView lyricsBackgroundSolidColorValueView;
@@ -4691,11 +4690,7 @@ public final class MainActivity extends Activity implements
         advancedRow.setOrientation(LinearLayout.HORIZONTAL);
         advancedRow.setGravity(Gravity.CENTER_VERTICAL);
         maxTokensInput = settingEditText("", false, false);
-        temperatureInput = settingEditText("", false, false);
         advancedRow.addView(settingField(ui("field.max_tokens"), "", maxTokensInput), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        LinearLayout.LayoutParams tempParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        tempParams.leftMargin = dp(10);
-        advancedRow.addView(settingField(ui("field.temperature"), "", temperatureInput), tempParams);
         settingsAiPage.addView(advancedRow, topMargin(matchWrap(), dp(12)));
 
         thinkingTokensInput = settingEditText("", false, false);
@@ -10045,9 +10040,6 @@ public final class MainActivity extends Activity implements
                     AiLyricsSettings.supportsThinkingTokens(snapshot.provider.id) ? View.VISIBLE : View.GONE
             );
         }
-        if (temperatureInput != null) {
-            temperatureInput.setText(String.format(Locale.ROOT, "%.2f", snapshot.temperature));
-        }
         populateSpotifyCredentialInputs(snapshot);
         if (metadataTranslationSwitch != null) {
             suppressSettingsEvents = true;
@@ -10202,8 +10194,7 @@ public final class MainActivity extends Activity implements
                 textOf(baseUrlInput),
                 textOf(modelInput),
                 parseInt(textOf(maxTokensInput), 16000),
-                parseInt(textOf(thinkingTokensInput), 0),
-                parseFloat(textOf(temperatureInput), 0.3f)
+                parseInt(textOf(thinkingTokensInput), 0)
         );
         applyBackgroundSettings(aiLyricsSettings.snapshot());
         if (updateStatus && aiSettingsStatusView != null) {
@@ -13251,14 +13242,6 @@ public final class MainActivity extends Activity implements
     private int parseInt(String value, int fallback) {
         try {
             return Integer.parseInt(value.trim());
-        } catch (Exception ignored) {
-            return fallback;
-        }
-    }
-
-    private float parseFloat(String value, float fallback) {
-        try {
-            return Float.parseFloat(value.trim());
         } catch (Exception ignored) {
             return fallback;
         }

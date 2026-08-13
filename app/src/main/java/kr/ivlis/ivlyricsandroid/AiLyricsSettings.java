@@ -41,7 +41,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
     static final String KEY_BASE_URL = "base_url";
     static final String KEY_MAX_TOKENS = "max_tokens";
     static final String KEY_THINKING_TOKENS = "thinking_tokens";
-    static final String KEY_TEMPERATURE = "temperature";
     static final String KEY_PREVIEW_MODE = "preview_mode";
     static final String KEY_PREVIEW_ITEMS = "preview_items";
     static final String KEY_AUTO_INSTRUMENTAL_BREAK = "auto_instrumental_break";
@@ -156,7 +155,7 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
             KEY_GOOGLE_TRANSLATE_ENABLED, KEY_AI_PROVIDER_ORDER, KEY_AI_PROVIDER_ENABLED,
             KEY_PROVIDER, KEY_TARGET_LANG, KEY_UI_LANG,
             KEY_OUTPUT_LANG, KEY_PRONUNCIATION_LANG, KEY_LANGUAGE_RULES, KEY_MODEL, KEY_MAX_TOKENS,
-            KEY_THINKING_TOKENS, KEY_TEMPERATURE, KEY_PREVIEW_MODE, KEY_PREVIEW_ITEMS,
+            KEY_THINKING_TOKENS, KEY_PREVIEW_MODE, KEY_PREVIEW_ITEMS,
             KEY_AUTO_INSTRUMENTAL_BREAK,
             KEY_INTERLUDE_LABELS_ENABLED, KEY_SYNCED_LYRICS_KARAOKE_ANIMATION, KEY_KARAOKE_BOUNCE_EFFECT,
             KEY_KARAOKE_DATA_AS_LINE_SYNCED, KEY_BACKGROUND_MODE, KEY_BACKGROUND_BRIGHTNESS,
@@ -175,8 +174,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
             KEY_VINYL_TONEARM_FINISH, KEY_VINYL_TONEARM_SIZE_PERCENT, KEY_SPEAKER_COLOR_SETTINGS,
             KEY_USE_SYNC_CREATOR_SPEAKER_COLORS, KEY_LYRICS_TEXT_ALIGNMENT
     )));
-    private static final Set<String> CLOUD_FLOAT_SETTING_KEYS = Collections.singleton(KEY_TEMPERATURE);
-
     static final List<Provider> PROVIDERS = Collections.unmodifiableList(Arrays.asList(
             new Provider(
                     "gemini",
@@ -357,11 +354,7 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
             if (value instanceof Boolean) {
                 editor.putBoolean(key, (Boolean) value);
             } else if (value instanceof Number) {
-                if (CLOUD_FLOAT_SETTING_KEYS.contains(key)) {
-                    editor.putFloat(key, ((Number) value).floatValue());
-                } else {
-                    editor.putInt(key, ((Number) value).intValue());
-                }
+                editor.putInt(key, ((Number) value).intValue());
             } else if (value instanceof String) {
                 editor.putString(key, (String) value);
             }
@@ -398,7 +391,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                 providerProfile.model,
                 providerProfile.maxTokens,
                 providerProfile.thinkingTokens,
-                providerProfile.temperature,
                 normalizePreviewMode(prefs.getString(KEY_PREVIEW_MODE, PREVIEW_MODE_ORIGINAL)),
                 normalizePreviewItems(prefs.contains(KEY_PREVIEW_ITEMS)
                         ? prefs.getInt(KEY_PREVIEW_ITEMS, PREVIEW_ITEM_ORIGINAL)
@@ -731,7 +723,7 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
     void setApiKeys(String apiKeys) {
         Snapshot current = snapshot();
         setProviderProfile(current.provider.id, apiKeys, current.baseUrl, current.model,
-                current.maxTokens, current.thinkingTokens, current.temperature);
+                current.maxTokens, current.thinkingTokens);
     }
 
     void setPollinationsAccessToken(String accessToken) {
@@ -747,31 +739,25 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
     void setModel(String model) {
         Snapshot current = snapshot();
         setProviderProfile(current.provider.id, current.apiKeys, current.baseUrl, model,
-                current.maxTokens, current.thinkingTokens, current.temperature);
+                current.maxTokens, current.thinkingTokens);
     }
 
     void setBaseUrl(String baseUrl) {
         Snapshot current = snapshot();
         setProviderProfile(current.provider.id, current.apiKeys, baseUrl, current.model,
-                current.maxTokens, current.thinkingTokens, current.temperature);
+                current.maxTokens, current.thinkingTokens);
     }
 
     void setMaxTokens(int maxTokens) {
         Snapshot current = snapshot();
         setProviderProfile(current.provider.id, current.apiKeys, current.baseUrl, current.model,
-                maxTokens, current.thinkingTokens, current.temperature);
+                maxTokens, current.thinkingTokens);
     }
 
     void setThinkingTokens(int thinkingTokens) {
         Snapshot current = snapshot();
         setProviderProfile(current.provider.id, current.apiKeys, current.baseUrl, current.model,
-                current.maxTokens, thinkingTokens, current.temperature);
-    }
-
-    void setTemperature(float temperature) {
-        Snapshot current = snapshot();
-        setProviderProfile(current.provider.id, current.apiKeys, current.baseUrl, current.model,
-                current.maxTokens, current.thinkingTokens, temperature);
+                current.maxTokens, thinkingTokens);
     }
 
     void setProviderProfile(
@@ -780,8 +766,7 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
             String baseUrl,
             String model,
             int maxTokens,
-            int thinkingTokens,
-            float temperature
+            int thinkingTokens
     ) {
         Provider provider = providerById(providerId);
         ProviderProfile profile = new ProviderProfile(
@@ -789,8 +774,7 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                 baseUrl == null || baseUrl.trim().isEmpty() ? provider.defaultBaseUrl : baseUrl,
                 model,
                 maxTokens,
-                thinkingTokens,
-                temperature
+                thinkingTokens
         );
         Map<String, ProviderProfile> profiles = new LinkedHashMap<>(loadProviderProfiles());
         profiles.put(provider.id, profile);
@@ -801,8 +785,7 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
             editor.putString(KEY_BASE_URL, profile.baseUrl)
                     .putString(KEY_MODEL, profile.model)
                     .putInt(KEY_MAX_TOKENS, profile.maxTokens)
-                    .putInt(KEY_THINKING_TOKENS, profile.thinkingTokens)
-                    .putFloat(KEY_TEMPERATURE, profile.temperature);
+                    .putInt(KEY_THINKING_TOKENS, profile.thinkingTokens);
         }
         editor.apply();
     }
@@ -1354,8 +1337,7 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                             object.optString("baseUrl", provider.defaultBaseUrl),
                             object.optString("model", provider.defaultModel),
                             object.optInt("maxTokens", 16000),
-                            object.optInt("thinkingTokens", 0),
-                            (float) object.optDouble("temperature", 0.3)
+                            object.optInt("thinkingTokens", 0)
                     ));
                 }
             } catch (Exception ignored) {
@@ -1372,8 +1354,7 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                         prefs.getString(KEY_BASE_URL, provider.defaultBaseUrl),
                         prefs.getString(KEY_MODEL, provider.defaultModel),
                         prefs.getInt(KEY_MAX_TOKENS, 16000),
-                        prefs.getInt(KEY_THINKING_TOKENS, 0),
-                        prefs.getFloat(KEY_TEMPERATURE, 0.3f)
+                        prefs.getInt(KEY_THINKING_TOKENS, 0)
                 ));
             } else {
                 profiles.put(provider.id, ProviderProfile.defaults(provider));
@@ -1425,7 +1406,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                 object.put("model", profile.model);
                 object.put("maxTokens", profile.maxTokens);
                 object.put("thinkingTokens", profile.thinkingTokens);
-                object.put("temperature", profile.temperature);
                 root.put(provider.id, object);
             } catch (JSONException ignored) {
             }
@@ -1750,10 +1730,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
         return autoTargetLanguage();
     }
 
-    private static float clampFloat(float value, float min, float max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
     private static int clampInt(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -1924,27 +1900,24 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
         final String model;
         final int maxTokens;
         final int thinkingTokens;
-        final float temperature;
 
         ProviderProfile(
                 String apiKeys,
                 String baseUrl,
                 String model,
                 int maxTokens,
-                int thinkingTokens,
-                float temperature
+                int thinkingTokens
         ) {
             this.apiKeys = apiKeys == null ? "" : apiKeys.trim();
             this.baseUrl = baseUrl == null ? "" : baseUrl.trim();
             this.model = model == null ? "" : model.trim();
             this.maxTokens = Math.max(256, maxTokens);
             this.thinkingTokens = Math.max(0, thinkingTokens);
-            this.temperature = clampFloat(temperature, 0f, 2f);
         }
 
         static ProviderProfile defaults(Provider provider) {
             Provider safe = provider == null ? PROVIDERS.get(0) : provider;
-            return new ProviderProfile("", safe.defaultBaseUrl, safe.defaultModel, 16000, 0, 0.3f);
+            return new ProviderProfile("", safe.defaultBaseUrl, safe.defaultModel, 16000, 0);
         }
     }
 
@@ -2189,7 +2162,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
         final String model;
         final int maxTokens;
         final int thinkingTokens;
-        final float temperature;
         final String previewMode;
         final int previewItems;
         final boolean autoInstrumentalBreakEnabled;
@@ -2241,7 +2213,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                 String model,
                 int maxTokens,
                 int thinkingTokens,
-                float temperature,
                 String previewMode,
                 int previewItems,
                 boolean autoInstrumentalBreakEnabled,
@@ -2294,7 +2265,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
             this.model = model == null ? "" : model;
             this.maxTokens = Math.max(256, maxTokens);
             this.thinkingTokens = Math.max(0, thinkingTokens);
-            this.temperature = clampFloat(temperature, 0f, 2f);
             this.previewMode = normalizePreviewMode(previewMode);
             this.previewItems = normalizePreviewItems(previewItems);
             this.autoInstrumentalBreakEnabled = autoInstrumentalBreakEnabled;
@@ -2438,7 +2408,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                     profile.model,
                     profile.maxTokens,
                     profile.thinkingTokens,
-                    profile.temperature,
                     previewMode,
                     previewItems,
                     autoInstrumentalBreakEnabled,
@@ -2524,8 +2493,7 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                     .append("|model=").append(model)
                     .append("|url=").append(baseUrl)
                     .append("|tok=").append(maxTokens)
-                    .append("|thinking=").append(thinkingTokens)
-                    .append("|temp=").append(temperature);
+                    .append("|thinking=").append(thinkingTokens);
             for (String providerId : aiProviderOrder) {
                 builder.append("|provider=").append(providerId)
                         .append(":enabled=").append(isAiProviderEnabled(providerId));
@@ -2535,7 +2503,6 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
                             .append(":url=").append(profile.baseUrl)
                             .append(":tok=").append(profile.maxTokens)
                             .append(":thinking=").append(profile.thinkingTokens)
-                            .append(":temp=").append(profile.temperature)
                             .append(":key=").append(profile.apiKeys.hashCode());
                 }
             }
