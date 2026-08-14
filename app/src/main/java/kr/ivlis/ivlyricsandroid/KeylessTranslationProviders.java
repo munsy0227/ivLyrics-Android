@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Translation-only, keyless web providers used before the selected AI provider. */
+/** Translation-only, keyless web providers used as no-key fallbacks by default. */
 final class KeylessTranslationProviders {
     static final String BING_ID = "bing-translate";
     static final String GOOGLE_ID = "google-translate";
@@ -221,7 +221,7 @@ final class KeylessTranslationProviders {
             return output;
         }
         if (lines.size() == 1) {
-            return Collections.singletonList(translatedText);
+            throw new IOException("Translation provider could not preserve lyric line alignment");
         }
 
         int middle = (lines.size() + 1) / 2;

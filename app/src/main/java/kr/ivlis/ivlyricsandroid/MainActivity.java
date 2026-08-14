@@ -1786,7 +1786,9 @@ public final class MainActivity extends Activity implements
         }
         aiLyricsGenerating = pronunciationLoading || translationLoading;
         setLyricsSupplementLoading(pronunciationLoading, translationLoading, lyricsSupplementFuriganaLoading);
-        currentLyricsResult = mergeAiSupplementsIntoResult(currentLyricsResult, result);
+        currentLyricsResult = hadError
+                ? result
+                : mergeAiSupplementsIntoResult(currentLyricsResult, result);
         currentLyricsResult = mergeCurrentFuriganaInto(currentLyricsResult);
         setLyricsResultOnViews(currentLyricsResult);
         updateLyricPreview(currentTrack == null ? 0L : currentLyricsPlaybackPosition(currentTrack));
@@ -12264,7 +12266,7 @@ public final class MainActivity extends Activity implements
         String source = effectiveSelectedSourceLang();
         AiLyricsSettings.LanguageRule rule = snapshot.ruleForSource(source);
         String target = snapshot.resolveTargetLanguage(source);
-        boolean translationSkipped = snapshot.shouldSkipTranslation(source, target);
+        boolean translationSkipped = shouldSkipLyricsTranslation(snapshot, source, target);
         boolean wantsAiTask = rule.pronunciationEnabled || (rule.translationEnabled && !translationSkipped);
         if (!snapshot.enabled()) {
             aiLyricsGenerating = false;
@@ -12347,7 +12349,7 @@ public final class MainActivity extends Activity implements
                 currentTrack,
                 requestBaseResult,
                 snapshot,
-                source,
+                selectedRuleSourceLang,
                 clearCache,
                 new SupplementGenerationCallback(generation, requestTrackKey, requestBaseResult)
         );
@@ -14308,12 +14310,25 @@ public final class MainActivity extends Activity implements
         AiLyricsSettings.LanguageRule rule = snapshot.ruleForSource(source);
         if (item == AiLyricsSettings.PREVIEW_ITEM_TRANSLATION) {
             String target = snapshot.resolveTargetLanguage(source);
-            return rule.translationEnabled && !snapshot.shouldSkipTranslation(source, target);
+            return rule.translationEnabled && !shouldSkipLyricsTranslation(snapshot, source, target);
         }
         if (item == AiLyricsSettings.PREVIEW_ITEM_PRONUNCIATION) {
             return rule.pronunciationEnabled;
         }
         return false;
+    }
+
+    private boolean shouldSkipLyricsTranslation(
+            AiLyricsSettings.Snapshot snapshot,
+            String sourceLang,
+            String targetLang
+    ) {
+        if (snapshot == null || !snapshot.shouldSkipTranslation(sourceLang, targetLang)) {
+            return false;
+        }
+        return !"auto".equalsIgnoreCase(selectedRuleSourceLang)
+                || currentBaseLyricsResult == null
+                || !AiLyricsRepository.hasMixedScriptLyrics(currentBaseLyricsResult.lines, targetLang);
     }
 
     private boolean shouldGenerateJapaneseFurigana(AiLyricsSettings.Snapshot snapshot, String sourceLang) {

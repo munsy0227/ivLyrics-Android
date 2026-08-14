@@ -1454,9 +1454,14 @@ final class AiLyricsSettings implements SharedPreferences.OnSharedPreferenceChan
 
     private static List<String> defaultAiProviderOrder() {
         List<String> order = new ArrayList<>();
-        for (Provider provider : ALL_AI_PROVIDERS) {
+        // Prefer a configured AI provider so the lyrics-specific prompt is
+        // actually used. Keyless translators remain enabled as no-key
+        // fallbacks and can still be moved earlier explicitly in settings.
+        for (Provider provider : PROVIDERS) {
             order.add(provider.id);
         }
+        order.add(KeylessTranslationProviders.BING_ID);
+        order.add(KeylessTranslationProviders.GOOGLE_ID);
         return Collections.unmodifiableList(order);
     }
 

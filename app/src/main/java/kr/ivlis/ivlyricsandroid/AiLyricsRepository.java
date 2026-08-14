@@ -37,7 +37,7 @@ final class AiLyricsRepository {
     private static final int CONNECT_TIMEOUT_MS = 12_000;
     private static final int READ_TIMEOUT_MS = 70_000;
     private static final long STREAM_PARTIAL_DISPATCH_INTERVAL_MS = 600L;
-    private static final String SUPPLEMENT_PROMPT_VERSION = "v7-lexical-fidelity-ai-only";
+    private static final String SUPPLEMENT_PROMPT_VERSION = "v8-complete-ai-first-mixed-language";
     private static final String TMI_PROMPT_VERSION = ResearchDocument.OUTPUT_VERSION;
     private static final String CULTURAL_ANNOTATION_PROMPT_VERSION = "cultural-v4";
     private static final int MAX_LYRICS_MEMORY_ENTRIES = 250;
@@ -54,6 +54,9 @@ final class AiLyricsRepository {
     private static final Pattern TAGGED_OUTPUT_PATTERN = Pattern.compile(
             "^\\s*(?:[-*]\\s*)?(?:\\[?L(\\d{1,4})\\]?|(?:row|line)\\s*(\\d{1,4})|#?(\\d{1,4}))\\s*(?:\\t|[:：|\\-]|\\.\\s+|\\s+)\\s*(.*)$",
             Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern NON_LYRIC_MARKER_PATTERN = Pattern.compile(
+            "^\\s*(?:♪+|\\[[^\\]\\r\\n]+])\\s*$"
     );
     private static final Pattern RESEARCH_TOKEN_LIMIT_PATTERN = Pattern.compile(
             "(?:MAX[_\\s-]*(?:OUTPUT[_\\s-]*)?TOKENS?|max[_\\s-]*(?:output[_\\s-]*)?tokens?|finish[_\\s-]*reason[^\\n]*(?:length|token)|context[_\\s-]*length)",
@@ -478,7 +481,7 @@ final class AiLyricsRepository {
 
     private static String sanitizeSupplement(String value, String sourceText) {
         String trimmed = value == null ? "" : value.trim();
-        return LyricsTextComparison.areEquivalent(trimmed, sourceText) ? "" : trimmed;
+        return areSourceEquivalent(trimmed, sourceText) ? "" : trimmed;
     }
 
     private static final class TaggedOutputLine {
@@ -500,6 +503,7 @@ final class AiLyricsRepository {
         List<String> translation = Collections.emptyList();
         boolean pronunciationFinished;
         boolean translationFinished;
+        boolean translationCacheable = true;
         boolean hadError;
 
         SupplementSession(
@@ -550,6 +554,14 @@ final class AiLyricsRepository {
         synchronized void markTranslationFailed() {
             translationFinished = true;
             hadError = true;
+        }
+
+        synchronized void markTranslationNotCacheable() {
+            translationCacheable = false;
+        }
+
+        synchronized boolean translationCacheable() {
+            return translationCacheable;
         }
 
         synchronized boolean pronunciationLoading() {
@@ -655,24 +667,20 @@ final class AiLyricsRepository {
             }
         }
 
-        void flush() {
-            boolean shouldDispatch;
-            synchronized (this) {
-                shouldDispatch = pending;
-                pending = false;
-                lastDispatchMs = SystemClock.uptimeMillis();
-            }
-            mainHandler.removeCallbacks(pendingRunnable);
-            if (shouldDispatch) {
-                dispatch();
-            }
-        }
-
         void cancelPending() {
             synchronized (this) {
                 pending = false;
             }
             mainHandler.removeCallbacks(pendingRunnable);
+        }
+
+        void dispatchNow() {
+            synchronized (this) {
+                pending = false;
+                lastDispatchMs = SystemClock.uptimeMillis();
+            }
+            mainHandler.removeCallbacks(pendingRunnable);
+            dispatch();
         }
 
         private void dispatchPending() {
@@ -839,6 +847,9 @@ final class AiLyricsRepository {
         String textPayload = buildPayloadText(baseResult.lines);
         String detectedSourceLang = detectLanguage(textPayload);
         String normalizedOverride = AiLyricsSettings.normalizeLanguageCode(sourceLangOverride);
+        boolean automaticSourceLanguage = normalizedOverride.isEmpty()
+                || "auto".equalsIgnoreCase(normalizedOverride);
+        String sourceMode = automaticSourceLanguage ? "auto" : normalizedOverride;
         String sourceLang = normalizedOverride.isEmpty() || "auto".equalsIgnoreCase(normalizedOverride)
                 ? detectedSourceLang
                 : normalizedOverride;
@@ -853,6 +864,7 @@ final class AiLyricsRepository {
         }
         String cacheKey = trackKey
                 + "|source=" + sourceLang
+                + "|sourceMode=" + sourceMode
                 + "|detected=" + detectedSourceLang
                 + "|prompt=" + SUPPLEMENT_PROMPT_VERSION
                 + "|" + settings.cacheKey()
@@ -876,7 +888,12 @@ final class AiLyricsRepository {
             }
         }
 
-        boolean translationSkipped = settings.shouldSkipTranslation(sourceLang, targetLang);
+        List<SupplementRequest> requests = buildSupplementRequests(baseResult.lines);
+        boolean sameLanguageTranslation = settings.shouldSkipTranslation(sourceLang, targetLang);
+        boolean mixedLanguageLyrics = sameLanguageTranslation
+                && automaticSourceLanguage
+                && hasMixedScriptLyrics(baseResult.lines, targetLang);
+        boolean translationSkipped = sameLanguageTranslation && !mixedLanguageLyrics;
         boolean selectedAiReady = settings.hasReadyAiProvider();
         boolean keylessTranslationReady = settings.hasKeylessTranslationProvider();
         boolean requestedPronunciation = rule.pronunciationEnabled;
@@ -901,17 +918,20 @@ final class AiLyricsRepository {
                 + " / translation=" + rule.translationEnabled
                 + " / pronunciation=" + rule.pronunciationEnabled);
 
-        List<SupplementRequest> requests = buildSupplementRequests(baseResult.lines);
         boolean needsPronunciation = requestedPronunciation && selectedAiReady;
         boolean needsTranslation = requestedTranslation && (keylessTranslationReady || selectedAiReady);
         if (translationSkipped) {
             emitLog(trackKey, callback, "ai translation skipped: source language matches target (" + sourceLang + " -> " + targetLang + ")");
+        } else if (mixedLanguageLyrics) {
+            emitLog(trackKey, callback, "ai translation enabled: mixed-language lyric rows detected despite dominant source="
+                    + sourceLang);
         }
         SupplementSession session = new SupplementSession(baseResult, requests, needsPronunciation, needsTranslation);
         String pronunciationCacheKey = supplementTaskCacheKey(
                 trackKey,
                 detectedSourceLang,
                 sourceLang,
+                sourceMode,
                 settings,
                 textPayload,
                 SUPPLEMENT_TASK_PRONUNCIATION,
@@ -921,6 +941,7 @@ final class AiLyricsRepository {
                 trackKey,
                 detectedSourceLang,
                 sourceLang,
+                sourceMode,
                 settings,
                 textPayload,
                 SUPPLEMENT_TASK_TRANSLATION,
@@ -1702,6 +1723,8 @@ final class AiLyricsRepository {
                         );
                         break;
                     } catch (Exception providerError) {
+                        session.resetPronunciationValues();
+                        partialDispatcher.request();
                         lastError = providerError;
                         log.write("ai pronunciation fallback: provider=" + providerSettings.provider.label
                                 + " / error=" + errorMessage(providerError));
@@ -1717,6 +1740,7 @@ final class AiLyricsRepository {
             } else {
                 values = null;
                 Exception lastError = null;
+                boolean aiProviderFailed = false;
                 List<String> sourceTexts = new ArrayList<>(requests.size());
                 for (SupplementRequest request : requests) {
                     sourceTexts.add(request.text);
@@ -1764,9 +1788,20 @@ final class AiLyricsRepository {
                             );
                         }
                         if (values != null) {
+                            requireCompleteTranslationValues(values, requests, provider.label);
+                            if (provider.keyless && aiProviderFailed) {
+                                session.markTranslationNotCacheable();
+                                log.write("translation fallback result will not be cached after AI provider failure");
+                            }
                             break;
                         }
                     } catch (Exception providerError) {
+                        values = null;
+                        if (!provider.keyless) {
+                            aiProviderFailed = true;
+                        }
+                        session.resetTranslationValues();
+                        partialDispatcher.request();
                         lastError = providerError;
                         log.write("translation fallback: provider=" + provider.label
                                 + " / error=" + errorMessage(providerError));
@@ -1787,7 +1822,9 @@ final class AiLyricsRepository {
                     values,
                     pronunciation
             );
-            cacheResult(taskCacheKey, taskResult);
+            if (pronunciation || session.translationCacheable()) {
+                cacheResult(taskCacheKey, taskResult);
+            }
 
             LyricsResult result = buildMergedSupplementResult(
                     session.baseResult,
@@ -1803,7 +1840,9 @@ final class AiLyricsRepository {
             );
             partialDispatcher.cancelPending();
             if (session.finished() && !session.hasError()) {
-                cacheResult(combinedCacheKey, result);
+                if (session.translationCacheable()) {
+                    cacheResult(combinedCacheKey, result);
+                }
                 mainHandler.post(() -> callback.onAiLyricsLoaded(trackKey, result));
             } else {
                 mainHandler.post(() -> callback.onAiLyricsPartialLoaded(
@@ -1824,7 +1863,7 @@ final class AiLyricsRepository {
                 session.markTranslationFailed();
                 log.write("ai translation error: " + message);
             }
-            partialDispatcher.flush();
+            partialDispatcher.dispatchNow();
             mainHandler.post(() -> callback.onAiLyricsTaskError(
                     trackKey,
                     message,
@@ -1875,6 +1914,12 @@ final class AiLyricsRepository {
             if (log != null) {
                 log.write("ai " + taskName + " stream fallback: " + errorMessage(streamError));
             }
+            if (pronunciation) {
+                session.resetPronunciationValues();
+            } else {
+                session.resetTranslationValues();
+            }
+            partialDispatcher.request();
             String raw = callProviderRaw(prompt, settings);
             return parseTaggedTextLines(raw, requests, taskName, log);
         }
@@ -1989,6 +2034,7 @@ final class AiLyricsRepository {
             String trackKey,
             String detectedSourceLang,
             String sourceLang,
+            String sourceMode,
             AiLyricsSettings.Snapshot settings,
             String textPayload,
             String task,
@@ -1996,6 +2042,7 @@ final class AiLyricsRepository {
     ) {
         return trackKey
                 + "|source=" + sourceLang
+                + "|sourceMode=" + sourceMode
                 + "|detected=" + detectedSourceLang
                 + "|prompt=" + SUPPLEMENT_PROMPT_VERSION
                 + "|task=" + task
@@ -2006,6 +2053,7 @@ final class AiLyricsRepository {
                 + "|url=" + settings.baseUrl
                 + "|tok=" + settings.maxTokens
                 + "|thinking=" + settings.thinkingTokens
+                + "|providerConfig=" + sha256(settings.cacheKey())
                 + "|output=" + outputLang
                 + "|text=" + sha256(textPayload);
     }
@@ -2352,29 +2400,38 @@ final class AiLyricsRepository {
                 + ":streamGenerateContent?alt=sse&key=" + urlQuery(apiKey);
         JSONObject body = geminiBody(prompt, settings, maxTokens);
         if (webSearch) body.put("tools", new JSONArray().put(new JSONObject().put("google_search", new JSONObject())));
-        return postJsonSse(endpoint, body, Collections.singletonMap("Content-Type", "application/json"), (eventName, data) -> {
+        boolean[] sawStop = {false};
+        String raw = postJsonSse(endpoint, body, Collections.singletonMap("Content-Type", "application/json"), (eventName, data) -> {
             if (data == null || data.trim().isEmpty() || "[DONE]".equals(data.trim())) {
                 return "";
             }
             JSONObject response = new JSONObject(data);
+            validateGeminiPromptFeedback(response);
             JSONArray candidates = response.optJSONArray("candidates");
             if (candidates == null || candidates.length() == 0) {
                 return "";
             }
             JSONObject candidate = candidates.optJSONObject(0);
+            if (validateGeminiFinishReason(candidate, true)) {
+                sawStop[0] = true;
+            }
             JSONObject responseContent = candidate == null ? null : candidate.optJSONObject("content");
             JSONArray responseParts = responseContent == null ? null : responseContent.optJSONArray("parts");
             StringBuilder builder = new StringBuilder();
             if (responseParts != null) {
                 for (int index = 0; index < responseParts.length(); index++) {
                     JSONObject part = responseParts.optJSONObject(index);
-                    if (part != null) {
+                    if (part != null && !part.optBoolean("thought", false)) {
                         builder.append(part.optString("text", ""));
                     }
                 }
             }
             return builder.toString();
         }, sink);
+        if (!sawStop[0]) {
+            throw new IOException("[Gemini] Response rejected (MISSING_FINISH_REASON)");
+        }
+        return raw;
     }
 
     private String callGemini(
@@ -2392,14 +2449,16 @@ final class AiLyricsRepository {
         if (candidates == null || candidates.length() == 0) {
             throw new IOException("[Gemini] Empty response from API");
         }
+        validateGeminiPromptFeedback(response);
         JSONObject candidate = candidates.optJSONObject(0);
+        validateGeminiFinishReason(candidate, false);
         JSONObject responseContent = candidate == null ? null : candidate.optJSONObject("content");
         JSONArray responseParts = responseContent == null ? null : responseContent.optJSONArray("parts");
         StringBuilder builder = new StringBuilder();
         if (responseParts != null) {
             for (int index = 0; index < responseParts.length(); index++) {
                 JSONObject part = responseParts.optJSONObject(index);
-                if (part != null) {
+                if (part != null && !part.optBoolean("thought", false)) {
                     builder.append(part.optString("text", ""));
                 }
             }
@@ -2409,6 +2468,40 @@ final class AiLyricsRepository {
             throw new IOException("[Gemini] Empty response from API");
         }
         return raw;
+    }
+
+    private static void validateGeminiPromptFeedback(JSONObject response) throws IOException {
+        JSONObject feedback = response == null ? null : response.optJSONObject("promptFeedback");
+        String reason = feedback == null ? "" : feedback.optString("blockReason", "").trim();
+        String normalized = reason.toUpperCase(Locale.ROOT);
+        if (!normalized.isEmpty()
+                && !"BLOCK_REASON_UNSPECIFIED".equals(normalized)
+                && !"UNSPECIFIED".equals(normalized)
+                && !"0".equals(normalized)) {
+            throw new IOException("[Gemini] Response rejected (" + normalized + ")");
+        }
+    }
+
+    private static boolean validateGeminiFinishReason(
+            JSONObject candidate,
+            boolean allowUnspecified
+    ) throws IOException {
+        String reason = candidate == null ? "" : candidate.optString("finishReason", "").trim();
+        String normalized = reason.toUpperCase(Locale.ROOT);
+        boolean unspecified = normalized.isEmpty()
+                || "FINISH_REASON_UNSPECIFIED".equals(normalized)
+                || "UNSPECIFIED".equals(normalized)
+                || "0".equals(normalized);
+        if (unspecified) {
+            if (allowUnspecified) {
+                return false;
+            }
+            throw new IOException("[Gemini] Response rejected (MISSING_FINISH_REASON)");
+        }
+        if (!"STOP".equals(normalized)) {
+            throw new IOException("[Gemini] Response rejected (" + normalized + ")");
+        }
+        return true;
     }
 
     private JSONObject geminiBody(ProviderPrompt prompt, AiLyricsSettings.Snapshot settings) throws JSONException {
@@ -2506,7 +2599,8 @@ final class AiLyricsRepository {
         if (webSearch) body.put("tools", new JSONArray().put(claudeWebSearchTool(settings.model)));
         body.put("stream", true);
         Map<String, String> headers = claudeHeaders(apiKey);
-        return postJsonSse(endpoint, body, headers, (eventName, data) -> {
+        boolean[] sawStop = {false};
+        String raw = postJsonSse(endpoint, body, headers, (eventName, data) -> {
             if (data == null || data.trim().isEmpty() || "[DONE]".equals(data.trim())) {
                 return "";
             }
@@ -2530,12 +2624,30 @@ final class AiLyricsRepository {
                 }
                 return "";
             }
+            if ("message_delta".equals(type)) {
+                JSONObject delta = object.optJSONObject("delta");
+                String stopReason = delta == null ? "" : delta.optString("stop_reason", "");
+                if (webSearch && "pause_turn".equalsIgnoreCase(stopReason.trim())) {
+                    throw new ResearchWebSearchException(
+                            "[Claude] Web search paused before a complete response",
+                            null
+                    );
+                }
+                if (validateClaudeStopReason(stopReason, true)) {
+                    sawStop[0] = true;
+                }
+                return "";
+            }
             if (!"content_block_delta".equals(type)) {
                 return "";
             }
             JSONObject delta = object.optJSONObject("delta");
             return delta == null ? "" : delta.optString("text", "");
         }, sink);
+        if (!sawStop[0]) {
+            throw new IOException("[Claude] Response rejected (missing_stop_reason)");
+        }
+        return raw;
     }
 
     private String callClaude(
@@ -2548,6 +2660,7 @@ final class AiLyricsRepository {
         Map<String, String> headers = claudeHeaders(apiKey);
 
         JSONObject response = new JSONObject(postJson(endpoint, body, headers));
+        validateClaudeStopReason(response.optString("stop_reason", ""), false);
         JSONArray content = response.optJSONArray("content");
         StringBuilder builder = new StringBuilder();
         if (content != null) {
@@ -2563,6 +2676,24 @@ final class AiLyricsRepository {
             throw new IOException("[Claude] Empty response from API");
         }
         return raw;
+    }
+
+    private static boolean validateClaudeStopReason(
+            String reason,
+            boolean allowUnspecified
+    ) throws IOException {
+        String normalized = reason == null ? "" : reason.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) {
+            if (allowUnspecified) {
+                return false;
+            }
+            throw new IOException("[Claude] Response rejected (missing_stop_reason)");
+        }
+        if (!"end_turn".equals(normalized)
+                && !"stop_sequence".equals(normalized)) {
+            throw new IOException("[Claude] Response rejected (" + normalized + ")");
+        }
+        return true;
     }
 
     private JSONObject claudeBody(ProviderPrompt prompt, AiLyricsSettings.Snapshot settings) throws JSONException {
@@ -2689,23 +2820,57 @@ final class AiLyricsRepository {
         }
         body.put("stream", true);
         Map<String, String> headers = openAiCompatibleHeaders(settings, apiKey);
-        return postJsonSse(endpoint, body, headers, (eventName, data) -> {
+        boolean[] sawStop = {false};
+        String raw = postJsonSse(endpoint, body, headers, (eventName, data) -> {
             if (data == null || data.trim().isEmpty() || "[DONE]".equals(data.trim())) {
                 return "";
             }
             JSONObject response = new JSONObject(data);
+            JSONObject responseError = response.optJSONObject("error");
+            if (responseError != null) {
+                throw new IOException("[" + settings.provider.label + "] " + firstNonEmpty(
+                        responseError.optString("message", ""),
+                        responseError.optString("code", ""),
+                        "Streaming API error"
+                ));
+            }
             JSONArray choices = response.optJSONArray("choices");
             if (choices == null || choices.length() == 0) {
                 return "";
             }
             JSONObject choice = choices.optJSONObject(0);
+            if (choice != null && choice.has("error") && choice.opt("error") != JSONObject.NULL) {
+                Object choiceError = choice.opt("error");
+                String detail = choiceError instanceof JSONObject
+                        ? firstNonEmpty(
+                                ((JSONObject) choiceError).optString("message", ""),
+                                ((JSONObject) choiceError).optString("code", "")
+                        )
+                        : String.valueOf(choiceError);
+                throw new IOException("[" + settings.provider.label + "] " + detail);
+            }
+            if (validateOpenAiFinishReason(
+                    choice == null ? "" : choice.optString("finish_reason", ""),
+                    true,
+                    settings.provider.label
+            )) {
+                sawStop[0] = true;
+            }
             JSONObject delta = choice == null ? null : choice.optJSONObject("delta");
+            Object refusal = delta == null ? null : delta.opt("refusal");
+            if (refusal != null && refusal != JSONObject.NULL && !String.valueOf(refusal).trim().isEmpty()) {
+                throw new IOException("[" + settings.provider.label + "] Response rejected (refusal)");
+            }
             if (delta != null) {
                 return extractOpenAiContent(delta.opt("content"));
             }
             JSONObject message = choice == null ? null : choice.optJSONObject("message");
             return extractOpenAiContent(message == null ? null : message.opt("content"));
         }, sink);
+        if (!sawStop[0]) {
+            throw new IOException("[" + settings.provider.label + "] Response rejected (missing_finish_reason)");
+        }
+        return raw;
     }
 
     private String callOpenAiCompatible(
@@ -2723,12 +2888,42 @@ final class AiLyricsRepository {
             throw new IOException("[" + settings.provider.label + "] Empty response from API");
         }
         JSONObject choice = choices.optJSONObject(0);
+        validateOpenAiFinishReason(
+                choice == null ? "" : choice.optString("finish_reason", ""),
+                false,
+                settings.provider.label
+        );
         JSONObject message = choice == null ? null : choice.optJSONObject("message");
+        Object refusal = message == null ? null : message.opt("refusal");
+        if (refusal != null && refusal != JSONObject.NULL && !String.valueOf(refusal).trim().isEmpty()) {
+            throw new IOException("[" + settings.provider.label + "] Response rejected (refusal)");
+        }
         String raw = extractOpenAiContent(message == null ? null : message.opt("content"));
         if (raw.trim().isEmpty()) {
             throw new IOException("[" + settings.provider.label + "] Empty response from API");
         }
         return raw;
+    }
+
+    private static boolean validateOpenAiFinishReason(
+            String reason,
+            boolean allowUnspecified,
+            String providerLabel
+    ) throws IOException {
+        String normalized = reason == null ? "" : reason.trim().toLowerCase(Locale.ROOT);
+        String label = providerLabel == null || providerLabel.trim().isEmpty()
+                ? "AI provider"
+                : providerLabel.trim();
+        if (normalized.isEmpty() || "null".equals(normalized)) {
+            if (allowUnspecified) {
+                return false;
+            }
+            throw new IOException("[" + label + "] Response rejected (missing_finish_reason)");
+        }
+        if (!"stop".equals(normalized)) {
+            throw new IOException("[" + label + "] Response rejected (" + normalized + ")");
+        }
+        return true;
     }
 
     private String callOpenAiResponsesStream(
@@ -3765,7 +3960,7 @@ final class AiLyricsRepository {
             List<SupplementRequest> requests,
             String taskName,
             LogSink log
-    ) {
+    ) throws IOException {
         int expectedLineCount = requests == null ? 0 : requests.size();
         List<String> values = emptySupplementList(expectedLineCount);
         if (expectedLineCount <= 0) {
@@ -3799,21 +3994,172 @@ final class AiLyricsRepository {
             if (duplicate > 0 && log != null) {
                 log.write("ai " + taskName + " alignment: duplicate IDs ignored=" + duplicate);
             }
+            if (SUPPLEMENT_TASK_TRANSLATION.equals(taskName)) {
+                requireCompleteTranslationValues(values, requests, "AI");
+            }
             return values;
         }
 
         if (matched > 0) {
             if (log != null) {
                 log.write("ai " + taskName + " alignment: matched=" + matched
-                        + "/" + expectedLineCount + ", missing rows left empty");
+                        + "/" + expectedLineCount + ", rejecting incomplete response");
             }
-            return values;
+            throw new IOException("AI " + taskName + " response is incomplete: matched "
+                    + matched + "/" + expectedLineCount + " row IDs");
         }
 
         if (log != null) {
-            log.write("ai " + taskName + " alignment: no row IDs in response, using line-count fallback");
+            log.write("ai " + taskName + " alignment: no row IDs in response, validating line-count fallback");
         }
-        return parseTextLines(text, expectedLineCount);
+        List<String> fallback = parseExactTextLines(text, expectedLineCount, taskName);
+        if (SUPPLEMENT_TASK_TRANSLATION.equals(taskName)) {
+            requireCompleteTranslationValues(fallback, requests, "AI");
+        }
+        return fallback;
+    }
+
+    private List<String> parseExactTextLines(
+            String text,
+            int expectedLineCount,
+            String taskName
+    ) throws IOException {
+        String cleaned = stripCodeFences(text == null ? "" : text).replace("\r\n", "\n").replace('\r', '\n');
+        List<String> lines = new ArrayList<>();
+        Collections.addAll(lines, cleaned.split("\n", -1));
+
+        if (lines.size() == expectedLineCount) {
+            return lines;
+        }
+        if (lines.size() == expectedLineCount + 1 && !lines.isEmpty()) {
+            if (lines.get(0).trim().isEmpty()) {
+                return new ArrayList<>(lines.subList(1, lines.size()));
+            }
+            if (lines.get(lines.size() - 1).trim().isEmpty()) {
+                return new ArrayList<>(lines.subList(0, lines.size() - 1));
+            }
+        }
+        if (lines.size() == expectedLineCount + 2
+                && !lines.isEmpty()
+                && lines.get(0).trim().isEmpty()
+                && lines.get(lines.size() - 1).trim().isEmpty()) {
+            return new ArrayList<>(lines.subList(1, lines.size() - 1));
+        }
+        throw new IOException("AI " + taskName + " response has " + lines.size()
+                + " rows; expected " + expectedLineCount);
+    }
+
+    private static void requireCompleteTranslationValues(
+            List<String> values,
+            List<SupplementRequest> requests,
+            String providerLabel
+    ) throws IOException {
+        int expectedLineCount = requests == null ? 0 : requests.size();
+        int actualLineCount = values == null ? 0 : values.size();
+        String label = providerLabel == null || providerLabel.trim().isEmpty()
+                ? "Translation provider"
+                : providerLabel.trim();
+        if (actualLineCount != expectedLineCount) {
+            throw new IOException("[" + label + "] Translation response has " + actualLineCount
+                    + " rows; expected " + expectedLineCount);
+        }
+        for (int index = 0; index < expectedLineCount; index++) {
+            String source = requests.get(index) == null ? "" : requests.get(index).text;
+            String translated = values.get(index) == null ? "" : values.get(index);
+            if (!source.trim().isEmpty() && translated.trim().isEmpty()) {
+                throw new IOException("[" + label + "] Translation response is empty for " + rowId(index));
+            }
+        }
+    }
+
+    private static boolean areSourceEquivalent(String value, String sourceText) {
+        String normalizedValue = value == null ? "" : value.trim();
+        String normalizedSource = sourceText == null ? "" : sourceText.trim();
+        return !normalizedValue.isEmpty()
+                && (normalizedValue.equals(normalizedSource)
+                || LyricsTextComparison.areEquivalent(normalizedValue, normalizedSource));
+    }
+
+    static boolean hasMixedScriptLyrics(List<LyricsLine> lines, String targetLang) {
+        return hasDifferentScriptLyrics(buildSupplementRequests(lines), targetLang);
+    }
+
+    private static boolean hasDifferentScriptLyrics(
+            List<SupplementRequest> requests,
+            String targetLang
+    ) {
+        if (requests == null || requests.isEmpty()) {
+            return false;
+        }
+        int foreignLetterCount = 0;
+        for (SupplementRequest request : requests) {
+            String sourceText = request == null ? "" : request.text.trim();
+            if (sourceText.isEmpty() || NON_LYRIC_MARKER_PATTERN.matcher(sourceText).matches()) {
+                continue;
+            }
+            for (int offset = 0; offset < sourceText.length();) {
+                int codePoint = sourceText.codePointAt(offset);
+                offset += Character.charCount(codePoint);
+                if (!Character.isLetter(codePoint)) {
+                    continue;
+                }
+                Character.UnicodeScript script = Character.UnicodeScript.of(codePoint);
+                if (script == Character.UnicodeScript.COMMON
+                        || script == Character.UnicodeScript.INHERITED
+                        || isTargetCompatibleScript(script, targetLang)) {
+                    continue;
+                }
+                foreignLetterCount++;
+                if (foreignLetterCount >= 2) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isTargetCompatibleScript(
+            Character.UnicodeScript script,
+            String targetLang
+    ) {
+        String normalizedTarget = AiLyricsSettings.normalizeLanguageCode(targetLang);
+        int separator = normalizedTarget.indexOf('-');
+        String baseTarget = (separator > 0 ? normalizedTarget.substring(0, separator) : normalizedTarget)
+                .toLowerCase(Locale.ROOT);
+        switch (baseTarget) {
+            case "ko":
+                return script == Character.UnicodeScript.HANGUL
+                        || script == Character.UnicodeScript.HAN;
+            case "ja":
+                return script == Character.UnicodeScript.HIRAGANA
+                        || script == Character.UnicodeScript.KATAKANA
+                        || script == Character.UnicodeScript.HAN;
+            case "zh":
+                return script == Character.UnicodeScript.HAN
+                        || script == Character.UnicodeScript.BOPOMOFO;
+            case "ru":
+            case "uk":
+            case "bg":
+                return script == Character.UnicodeScript.CYRILLIC;
+            case "ar":
+            case "fa":
+            case "ur":
+                return script == Character.UnicodeScript.ARABIC;
+            case "hi":
+            case "mr":
+            case "ne":
+                return script == Character.UnicodeScript.DEVANAGARI;
+            case "bn":
+                return script == Character.UnicodeScript.BENGALI;
+            case "th":
+                return script == Character.UnicodeScript.THAI;
+            case "el":
+                return script == Character.UnicodeScript.GREEK;
+            case "he":
+                return script == Character.UnicodeScript.HEBREW;
+            default:
+                return script == Character.UnicodeScript.LATIN;
+        }
     }
 
     private static List<String> emptySupplementList(int size) {
