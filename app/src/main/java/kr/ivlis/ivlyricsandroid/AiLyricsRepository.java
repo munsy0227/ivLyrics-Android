@@ -37,7 +37,7 @@ final class AiLyricsRepository {
     private static final int CONNECT_TIMEOUT_MS = 12_000;
     private static final int READ_TIMEOUT_MS = 70_000;
     private static final long STREAM_PARTIAL_DISPATCH_INTERVAL_MS = 600L;
-    private static final String SUPPLEMENT_PROMPT_VERSION = "v8-complete-ai-first-mixed-language";
+    private static final String SUPPLEMENT_PROMPT_VERSION = "v9-singer-japanese-fidelity";
     private static final String TMI_PROMPT_VERSION = ResearchDocument.OUTPUT_VERSION;
     private static final String CULTURAL_ANNOTATION_PROMPT_VERSION = "cultural-v4";
     private static final int MAX_LYRICS_MEMORY_ENTRIES = 250;
@@ -3456,7 +3456,7 @@ final class AiLyricsRepository {
         String systemPrompt = "You are the lyrics translation system for ivLyrics.\n\n"
                 + "Translate song lyrics into " + langInfo.name + " (" + langInfo.nativeName + ").\n\n"
                 + LyricsTranslationInstructions.TEXT
-                + "APPLICATION OUTPUT CONTRACT:\n"
+                + "\n\nAPPLICATION OUTPUT CONTRACT:\n"
                 + "- The instructions above govern translation quality and line semantics. The rules below adapt only the output format required by ivLyrics and take precedence where formatting rules conflict.\n"
                 + "- L0001-style ID tags are immutable transport metadata required by the app parser. They are not lyric content, commentary, or optional labels.\n"
                 + "- This is a translation task. Translate the meaning of every non-empty lyric row.\n"
