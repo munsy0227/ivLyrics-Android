@@ -143,8 +143,10 @@ public final class MainActivity extends Activity implements
     private static final String SYNC_DATA_SPOTIFY_ORIGIN = "https://xpui.app.spotify.com";
     private static final String SYNC_DATA_SPOTIFY_REFERER = "https://xpui.app.spotify.com/";
     private static final String UI_HINTS_PREFS = "ui_hints";
+    private static final String RESEARCH_PREFS = "research_preferences";
     private static final String UPDATE_PREFS = "app_updates";
     private static final String KEY_LYRICS_META_MENU_TIP_SHOWN = "lyrics_meta_menu_tip_shown";
+    private static final String KEY_RESEARCH_TOKEN_CONSENT_V1 = "token_consent_v1";
     private static final String KEY_LAST_AUTO_UPDATE_CHECK_MS = "last_auto_update_check_ms";
     private static final long AUTO_UPDATE_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L;
     private static final long PLAYBACK_CLOCK_INTERVAL_MS = 33L;
@@ -274,6 +276,7 @@ public final class MainActivity extends Activity implements
     private PopupWindow lyricsMetaMenuPopup;
     private ScrollView lyricsMetaMenuScrollView;
     private AlertDialog tmiDialog;
+    private AlertDialog researchTokenConsentDialog;
     private AlertDialog firstLanguagePromptDialog;
     private LinearLayout tmiDialogBody;
     private TextView tmiDialogRegenerateButton;
@@ -307,6 +310,7 @@ public final class MainActivity extends Activity implements
     private LinearLayout settingsAiPage;
     private LinearLayout settingsSystemPage;
     private LinearLayout previewModeButtonsContainer;
+    private LinearLayout karaokeDisplayGranularityButtonsContainer;
     private LinearLayout lyricsAlignmentButtonsContainer;
     private LinearLayout pipOrientationButtonsContainer;
     private LinearLayout pipLyricsAlignmentButtonsContainer;
@@ -329,7 +333,6 @@ public final class MainActivity extends Activity implements
     private Switch interludeLabelsSwitch;
     private Switch syncedLyricsKaraokeSwitch;
     private Switch karaokeBounceSwitch;
-    private Switch karaokeDataAsLineSyncedSwitch;
     private Switch preferSyncDataProviderSwitch;
     private Switch preferLyricsTypeFirstSwitch;
     private Switch useSyncCreatorSpeakerColorsSwitch;
@@ -562,6 +565,7 @@ public final class MainActivity extends Activity implements
     protected void onCreate(Bundle savedInstanceState) {
         setTheme(R.style.AppTheme);
         super.onCreate(savedInstanceState);
+        LyricsWordSegmenter.initialize(getApplicationContext());
         aiLyricsSettings = new AiLyricsSettings(this);
         currentGlobalSyncOffsetMs = aiLyricsSettings.globalSyncOffsetMs();
         lyricsProviderSettings = new LyricsProviderSettings(this);
@@ -942,6 +946,7 @@ public final class MainActivity extends Activity implements
         handler.removeCallbacksAndMessages(null);
         dismissLyricsMetaTip();
         dismissLyricsMetaMenuPopup();
+        dismissResearchTokenConsentDialog();
         dismissTmiDialog();
         cancelArtworkLongPress();
         if (pendingLyricsProviderReload != null) {
@@ -990,6 +995,11 @@ public final class MainActivity extends Activity implements
         if (isInAppBrowserVisible()) {
             lastBackPressElapsedMs = 0L;
             showInAppBrowser(false);
+            return;
+        }
+        if (researchTokenConsentDialog != null && researchTokenConsentDialog.isShowing()) {
+            lastBackPressElapsedMs = 0L;
+            dismissResearchTokenConsentDialog();
             return;
         }
         if (tmiDialog != null && tmiDialog.isShowing()) {
@@ -2067,7 +2077,7 @@ public final class MainActivity extends Activity implements
         if (aiLyricsSettings != null) {
             AiLyricsSettings.Snapshot settings = aiLyricsSettings.snapshot();
             view.lyricView().setKaraokeBounceEffectEnabled(settings.karaokeBounceEffectEnabled);
-            view.lyricView().setKaraokeDataAsLineSynced(settings.karaokeDataAsLineSynced);
+            view.lyricView().setKaraokeDisplayGranularity(settings.karaokeDisplayGranularity);
             view.setCustomization(settings.vinyl, settings.typography);
         }
         view.setLoadingText(vinylLoadingText(), false);
@@ -2347,7 +2357,7 @@ public final class MainActivity extends Activity implements
         attachPageSwipe(lyricPreviewContainer, true, true);
         lyricPreviewView = new MainLyricPreviewView(this);
         lyricPreviewView.setKaraokeBounceEffectEnabled(aiLyricsSettings.snapshot().karaokeBounceEffectEnabled);
-        lyricPreviewView.setKaraokeDataAsLineSynced(aiLyricsSettings.snapshot().karaokeDataAsLineSynced);
+        lyricPreviewView.setKaraokeDisplayGranularity(aiLyricsSettings.snapshot().karaokeDisplayGranularity);
         lyricPreviewView.setTypographySettings(aiLyricsSettings.snapshot().typography);
         lyricPreviewContainer.addView(lyricPreviewView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2904,7 +2914,7 @@ public final class MainActivity extends Activity implements
         landscapeLyricsView.setInterludeLabelsEnabled(aiLyricsSettings.snapshot().interludeLabelsEnabled);
         landscapeLyricsView.setSyncedLyricsKaraokeAnimationEnabled(aiLyricsSettings.snapshot().syncedLyricsKaraokeAnimationEnabled);
         landscapeLyricsView.setKaraokeBounceEffectEnabled(aiLyricsSettings.snapshot().karaokeBounceEffectEnabled);
-        landscapeLyricsView.setKaraokeDataAsLineSynced(aiLyricsSettings.snapshot().karaokeDataAsLineSynced);
+        landscapeLyricsView.setKaraokeDisplayGranularity(aiLyricsSettings.snapshot().karaokeDisplayGranularity);
         landscapeLyricsView.setJapaneseFuriganaEnabled(aiLyricsSettings.snapshot().japaneseFuriganaEnabled);
         landscapeLyricsView.setTypographySettings(aiLyricsSettings.snapshot().typography);
         landscapeLyricsView.setLyricTextAlignment(aiLyricsSettings.snapshot().lyricsTextAlignment);
@@ -3090,11 +3100,18 @@ public final class MainActivity extends Activity implements
             }
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-            decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            decorView.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            );
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 WindowInsetsController controller = window.getInsetsController();
                 if (controller != null) {
-                    controller.show(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                    controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                    controller.show(WindowInsets.Type.statusBars());
+                    controller.hide(WindowInsets.Type.navigationBars());
                 }
             }
         }
@@ -3382,7 +3399,7 @@ public final class MainActivity extends Activity implements
         lyricsView.setInterludeLabelsEnabled(aiLyricsSettings.snapshot().interludeLabelsEnabled);
         lyricsView.setSyncedLyricsKaraokeAnimationEnabled(aiLyricsSettings.snapshot().syncedLyricsKaraokeAnimationEnabled);
         lyricsView.setKaraokeBounceEffectEnabled(aiLyricsSettings.snapshot().karaokeBounceEffectEnabled);
-        lyricsView.setKaraokeDataAsLineSynced(aiLyricsSettings.snapshot().karaokeDataAsLineSynced);
+        lyricsView.setKaraokeDisplayGranularity(aiLyricsSettings.snapshot().karaokeDisplayGranularity);
         lyricsView.setJapaneseFuriganaEnabled(aiLyricsSettings.snapshot().japaneseFuriganaEnabled);
         lyricsView.setTypographySettings(aiLyricsSettings.snapshot().typography);
         lyricsView.setLyricTextAlignment(aiLyricsSettings.snapshot().lyricsTextAlignment);
@@ -4293,19 +4310,13 @@ public final class MainActivity extends Activity implements
         });
         settingsLyricsPage.addView(syncedLyricsKaraokeSwitch, topMargin(matchWrap(), dp(12)));
 
-        karaokeDataAsLineSyncedSwitch = settingSwitch(
-                ui("setting.karaoke_data_as_line_synced"),
-                ui("setting.karaoke_data_as_line_synced_desc")
-        );
-        karaokeDataAsLineSyncedSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (suppressSettingsEvents || aiLyricsSettings == null) {
-                return;
-            }
-            aiLyricsSettings.setKaraokeDataAsLineSynced(isChecked);
-            setKaraokeDataAsLineSyncedOnViews(isChecked);
-            showSavedToast(ui("toast.settings_saved"));
-        });
-        settingsLyricsPage.addView(karaokeDataAsLineSyncedSwitch, topMargin(matchWrap(), dp(12)));
+        karaokeDisplayGranularityButtonsContainer = new LinearLayout(this);
+        karaokeDisplayGranularityButtonsContainer.setOrientation(LinearLayout.HORIZONTAL);
+        settingsLyricsPage.addView(settingGroup(
+                ui("setting.karaoke_display_granularity"),
+                ui("setting.karaoke_display_granularity_desc"),
+                karaokeDisplayGranularityButtonsContainer
+        ), topMargin(matchWrap(), dp(12)));
 
         karaokeBounceSwitch = settingSwitch(
                 ui("setting.karaoke_bounce_effect"),
@@ -7956,11 +7967,7 @@ public final class MainActivity extends Activity implements
         showLanguageSelectPopup(anchor, outputLanguageChoices(), aiLyricsSettings.snapshot().outputLang, code -> {
             aiLyricsSettings.setOutputLang(code);
             rebuildLanguageSettingsUi(aiLyricsSettings.snapshot());
-            translatedTrackTitle = "";
-            translatedTrackArtist = "";
-            updateTrackMetadataTextViews(currentTrack);
-            requestMetadataTranslation(true);
-            requestAiLyrics(true);
+            requestAiLyrics(false);
             showSavedToast(ui("toast.pronunciation_language_saved"));
         });
     }
@@ -8046,6 +8053,38 @@ public final class MainActivity extends Activity implements
                 params.leftMargin = dp(8);
             }
             lyricsAlignmentButtonsContainer.addView(button, params);
+        }
+    }
+
+    private void rebuildKaraokeDisplayGranularityButtons(String selectedGranularity) {
+        if (karaokeDisplayGranularityButtonsContainer == null || aiLyricsSettings == null) {
+            return;
+        }
+        String selected = AiLyricsSettings.normalizeKaraokeDisplayGranularity(selectedGranularity);
+        karaokeDisplayGranularityButtonsContainer.removeAllViews();
+        String[] granularities = {
+                AiLyricsSettings.KARAOKE_DISPLAY_CHARACTER,
+                AiLyricsSettings.KARAOKE_DISPLAY_WORD,
+                AiLyricsSettings.KARAOKE_DISPLAY_LINE
+        };
+        for (int index = 0; index < granularities.length; index++) {
+            String granularity = granularities[index];
+            TextView button = languageButton(
+                    ui("karaoke.display." + granularity),
+                    granularity.equals(selected)
+            );
+            button.setOnClickListener(view -> {
+                aiLyricsSettings.setKaraokeDisplayGranularity(granularity);
+                AiLyricsSettings.Snapshot snapshot = aiLyricsSettings.snapshot();
+                rebuildKaraokeDisplayGranularityButtons(snapshot.karaokeDisplayGranularity);
+                setKaraokeDisplayGranularityOnViews(snapshot.karaokeDisplayGranularity);
+                showSavedToast(ui("toast.settings_saved"));
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1f);
+            if (index > 0) {
+                params.leftMargin = dp(8);
+            }
+            karaokeDisplayGranularityButtonsContainer.addView(button, params);
         }
     }
 
@@ -8666,7 +8705,7 @@ public final class MainActivity extends Activity implements
         view.setInterludeLabelsEnabled(snapshot.interludeLabelsEnabled);
         view.setSyncedLyricsKaraokeAnimationEnabled(snapshot.syncedLyricsKaraokeAnimationEnabled);
         view.setKaraokeBounceEffectEnabled(snapshot.karaokeBounceEffectEnabled);
-        view.setKaraokeDataAsLineSynced(snapshot.karaokeDataAsLineSynced);
+        view.setKaraokeDisplayGranularity(snapshot.karaokeDisplayGranularity);
         view.setJapaneseFuriganaEnabled(snapshot.japaneseFuriganaEnabled);
         view.setTypographySettings(snapshot.typography);
         view.setTypographySizeMultiplier(1f);
@@ -9925,6 +9964,7 @@ public final class MainActivity extends Activity implements
     private void updateDetectedLyricsSourceLanguage(LyricsResult result) {
         if (result == null || result.lines == null || result.lines.isEmpty()) {
             detectedLyricsSourceLang = detectCurrentTrackMetadataLanguage();
+            applyLyricsSegmentationLocaleToViews();
             return;
         }
         String detected = AiLyricsRepository.detectLanguage(AiLyricsRepository.buildPayloadText(result.lines));
@@ -9932,6 +9972,16 @@ public final class MainActivity extends Activity implements
         if (detectedLyricsSourceLang == null || detectedLyricsSourceLang.trim().isEmpty()) {
             detectedLyricsSourceLang = detectCurrentTrackMetadataLanguage();
         }
+        applyLyricsSegmentationLocaleToViews();
+    }
+
+    private void applyLyricsSegmentationLocaleToViews() {
+        String locale = effectiveSelectedSourceLang();
+        if (lyricsView != null) lyricsView.setLyricsSegmentationLocale(locale);
+        if (landscapeLyricsView != null) landscapeLyricsView.setLyricsSegmentationLocale(locale);
+        if (pictureInPictureLyricsView != null) pictureInPictureLyricsView.setLyricsSegmentationLocale(locale);
+        if (lyricPreviewView != null) lyricPreviewView.setLyricsSegmentationLocale(locale);
+        if (vinylPlayerModeView != null) vinylPlayerModeView.lyricView().setLyricsSegmentationLocale(locale);
     }
 
     private String detectCurrentTrackMetadataLanguage() {
@@ -10107,11 +10157,7 @@ public final class MainActivity extends Activity implements
             karaokeBounceSwitch.setChecked(snapshot.karaokeBounceEffectEnabled);
             suppressSettingsEvents = false;
         }
-        if (karaokeDataAsLineSyncedSwitch != null) {
-            suppressSettingsEvents = true;
-            karaokeDataAsLineSyncedSwitch.setChecked(snapshot.karaokeDataAsLineSynced);
-            suppressSettingsEvents = false;
-        }
+        rebuildKaraokeDisplayGranularityButtons(snapshot.karaokeDisplayGranularity);
         if (lyricsProviderSettings != null) {
             LyricsProviderSettings.Snapshot providerSettings = lyricsProviderSettings.snapshot();
             if (preferLyricsTypeFirstSwitch != null) {
@@ -11012,6 +11058,11 @@ public final class MainActivity extends Activity implements
         if (aiLyricsRepository == null || aiLyricsSettings == null) {
             return;
         }
+        AiLyricsSettings.Snapshot settings = aiLyricsSettings.snapshot();
+        if (settings.hasApiKey() && settings.hasModel() && !hasResearchTokenConsent()) {
+            showResearchTokenConsentDialog(bypassCache);
+            return;
+        }
         String trackKey = snapshot.stableKey();
         boolean sameRequest = trackKey.equals(currentTmiRequestKey);
         boolean needsNewDialog = tmiDialog == null
@@ -11028,7 +11079,6 @@ public final class MainActivity extends Activity implements
             return;
         }
 
-        AiLyricsSettings.Snapshot settings = aiLyricsSettings.snapshot();
         renderTmiLoading(snapshot);
         if (!settings.hasApiKey()) {
             renderTmiError(ui("tmi.require_key"));
@@ -11040,6 +11090,146 @@ public final class MainActivity extends Activity implements
         }
         tmiRequestInFlight = true;
         aiLyricsRepository.loadTmi(snapshot, currentBaseLyricsResult, settings, bypassCache, this);
+    }
+
+    private boolean hasResearchTokenConsent() {
+        return getSharedPreferences(RESEARCH_PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_RESEARCH_TOKEN_CONSENT_V1, false);
+    }
+
+    private void rememberResearchTokenConsent() {
+        getSharedPreferences(RESEARCH_PREFS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_RESEARCH_TOKEN_CONSENT_V1, true)
+                .apply();
+    }
+
+    private void showResearchTokenConsentDialog(boolean bypassCache) {
+        if (isFinishing()) {
+            return;
+        }
+        if (researchTokenConsentDialog != null && researchTokenConsentDialog.isShowing()) {
+            return;
+        }
+
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setGravity(Gravity.CENTER_HORIZONTAL);
+        shell.setPadding(dp(24), dp(24), dp(24), dp(20));
+        GradientDrawable shellBackground = roundDrawable(Color.rgb(18, 20, 30), dp(22));
+        shellBackground.setStroke(dp(1), Color.argb(46, 245, 158, 11));
+        shell.setBackground(shellBackground);
+
+        TextView icon = label("!", 23f, Color.rgb(251, 191, 36), AppFonts.bold(this));
+        icon.setGravity(Gravity.CENTER);
+        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        icon.setBackground(roundDrawable(Color.argb(42, 245, 158, 11), dp(28)));
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(56), dp(56));
+        iconParams.gravity = Gravity.CENTER_HORIZONTAL;
+        shell.addView(icon, iconParams);
+
+        TextView eyebrow = label(
+                ui("tmi.title"),
+                11f,
+                Color.rgb(251, 191, 36),
+                AppFonts.semiBold(this)
+        );
+        eyebrow.setGravity(Gravity.CENTER);
+        eyebrow.setLetterSpacing(0.08f);
+        shell.addView(eyebrow, topMargin(matchWrap(), dp(14)));
+
+        TextView title = label(
+                ui("research.token_consent_title"),
+                20f,
+                Color.rgb(248, 250, 252),
+                AppFonts.bold(this)
+        );
+        title.setGravity(Gravity.CENTER);
+        title.setLineSpacing(0f, 1.08f);
+        shell.addView(title, topMargin(matchWrap(), dp(7)));
+
+        TextView body = label(
+                ui("research.token_consent_body"),
+                14.5f,
+                Color.argb(190, 248, 250, 252),
+                AppFonts.regular(this)
+        );
+        body.setGravity(Gravity.CENTER);
+        body.setLineSpacing(0f, 1.15f);
+        shell.addView(body, topMargin(matchWrap(), dp(12)));
+
+        TextView note = label(
+                "•  " + ui("research.token_consent_note"),
+                12.5f,
+                Color.rgb(254, 243, 199),
+                AppFonts.regular(this)
+        );
+        note.setLineSpacing(0f, 1.14f);
+        note.setPadding(dp(12), dp(11), dp(12), dp(11));
+        GradientDrawable noteBackground = roundDrawable(Color.argb(28, 245, 158, 11), dp(11));
+        noteBackground.setStroke(dp(1), Color.argb(58, 245, 158, 11));
+        note.setBackground(noteBackground);
+        shell.addView(note, topMargin(matchWrap(), dp(16)));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        shell.addView(actions, topMargin(matchWrap(), dp(18)));
+
+        TextView cancel = debugButton(ui("button.close"));
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(46), 0.8f));
+
+        TextView agree = debugButton(ui("research.token_consent_agree"));
+        agree.setTextColor(Color.rgb(30, 24, 10));
+        agree.setBackground(roundDrawable(Color.rgb(251, 191, 36), dp(10)));
+        LinearLayout.LayoutParams agreeParams = new LinearLayout.LayoutParams(0, dp(46), 1.35f);
+        agreeParams.leftMargin = dp(8);
+        actions.addView(agree, agreeParams);
+
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setFillViewport(false);
+        scrollView.setClipToPadding(false);
+        scrollView.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        scrollView.addView(shell, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(scrollView)
+                .create();
+        researchTokenConsentDialog = dialog;
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.setOnDismissListener(ignored -> {
+            if (researchTokenConsentDialog == dialog) {
+                researchTokenConsentDialog = null;
+            }
+        });
+        cancel.setOnClickListener(view -> dialog.dismiss());
+        agree.setOnClickListener(view -> {
+            rememberResearchTokenConsent();
+            dialog.dismiss();
+            showTmiForCurrentTrack(bypassCache);
+        });
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setDimAmount(0.56f);
+            int width = Math.min(
+                    getResources().getDisplayMetrics().widthPixels - dp(32),
+                    dp(440)
+            );
+            window.setLayout(Math.max(dp(300), width), ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void dismissResearchTokenConsentDialog() {
+        if (researchTokenConsentDialog != null) {
+            researchTokenConsentDialog.dismiss();
+        }
+        researchTokenConsentDialog = null;
     }
 
     private void showTmiDialog(TrackSnapshot snapshot) {
@@ -12488,6 +12678,12 @@ public final class MainActivity extends Activity implements
         if (metadataTranslationLoading) {
             return ui("loading.translation");
         }
+        if (lyricsSupplementTranslationLoading && lyricsSupplementPronunciationLoading) {
+            return aiProviderLoadingText(
+                    "status.ai_generating_provider_format",
+                    "status.ai_generating"
+            );
+        }
         if (lyricsSupplementTranslationLoading) {
             return aiProviderLoadingText(
                     "loading.translation_provider_format",
@@ -12534,6 +12730,12 @@ public final class MainActivity extends Activity implements
         }
         if (metadataTranslationLoading) {
             return ui("loading.translation");
+        }
+        if (lyricsSupplementTranslationLoading && lyricsSupplementPronunciationLoading) {
+            return aiProviderLoadingText(
+                    "status.ai_generating_provider_format",
+                    "status.ai_generating"
+            );
         }
         if (lyricsSupplementTranslationLoading) {
             return aiProviderLoadingText(
@@ -12627,18 +12829,21 @@ public final class MainActivity extends Activity implements
     private void setLyricsResultOnViews(LyricsResult result) {
         if (lyricsView != null) {
             configureLyricsViewUiText(lyricsView);
+            lyricsView.setLyricsSegmentationLocale(effectiveSelectedSourceLang());
             lyricsView.setLoadingState(lyricsLookupInFlight);
             lyricsView.setResult(result);
             applyCulturalAnnotationsToView(lyricsView);
         }
         if (landscapeLyricsView != null) {
             configureLyricsViewUiText(landscapeLyricsView);
+            landscapeLyricsView.setLyricsSegmentationLocale(effectiveSelectedSourceLang());
             landscapeLyricsView.setLoadingState(lyricsLookupInFlight);
             landscapeLyricsView.setResult(result);
             applyCulturalAnnotationsToView(landscapeLyricsView);
         }
         if (pictureInPictureLyricsView != null) {
             configureLyricsViewUiText(pictureInPictureLyricsView);
+            pictureInPictureLyricsView.setLyricsSegmentationLocale(effectiveSelectedSourceLang());
             pictureInPictureLyricsView.setLoadingState(lyricsLookupInFlight);
             pictureInPictureLyricsView.setResult(result);
         }
@@ -13205,21 +13410,21 @@ public final class MainActivity extends Activity implements
         }
     }
 
-    private void setKaraokeDataAsLineSyncedOnViews(boolean enabled) {
+    private void setKaraokeDisplayGranularityOnViews(String granularity) {
         if (lyricsView != null) {
-            lyricsView.setKaraokeDataAsLineSynced(enabled);
+            lyricsView.setKaraokeDisplayGranularity(granularity);
         }
         if (landscapeLyricsView != null) {
-            landscapeLyricsView.setKaraokeDataAsLineSynced(enabled);
+            landscapeLyricsView.setKaraokeDisplayGranularity(granularity);
         }
         if (pictureInPictureLyricsView != null) {
-            pictureInPictureLyricsView.setKaraokeDataAsLineSynced(enabled);
+            pictureInPictureLyricsView.setKaraokeDisplayGranularity(granularity);
         }
         if (lyricPreviewView != null) {
-            lyricPreviewView.setKaraokeDataAsLineSynced(enabled);
+            lyricPreviewView.setKaraokeDisplayGranularity(granularity);
         }
         if (vinylPlayerModeView != null) {
-            vinylPlayerModeView.lyricView().setKaraokeDataAsLineSynced(enabled);
+            vinylPlayerModeView.lyricView().setKaraokeDisplayGranularity(granularity);
         }
     }
 
@@ -13480,9 +13685,11 @@ public final class MainActivity extends Activity implements
             LyricsLine sourceLine
     ) {
         if (lyricPreviewView != null) {
+            lyricPreviewView.setLyricsSegmentationLocale(effectiveSelectedSourceLang());
             lyricPreviewView.setPreview(rows, positionMs, lineStartMs, lineEndMs, playing);
         }
         if (vinylPlayerModeView != null) {
+            vinylPlayerModeView.lyricView().setLyricsSegmentationLocale(effectiveSelectedSourceLang());
             vinylPlayerModeView.lyricView().setPreview(
                     vinylPreviewRows(rows, sourceLine),
                     positionMs,
@@ -13676,7 +13883,10 @@ public final class MainActivity extends Activity implements
     private PreviewEntry markerInterludeEntry(LyricsLine line, int lineIndex, int lineCount) {
         long endTimeMs = Math.max(line.endTimeMs, nextPreviewRenderableLineStartAfter(lineIndex));
         long durationMs = endTimeMs > line.startTimeMs ? endTimeMs - line.startTimeMs : 0L;
-        if (durationMs <= PREVIEW_INTERLUDE_MIN_DURATION_MS) {
+        long minimumDurationMs = isPreviewMusicNoteInterludeMarkerText(previewInterludeCandidateText(line))
+                ? 0L
+                : PREVIEW_INTERLUDE_MIN_DURATION_MS;
+        if (durationMs <= minimumDurationMs) {
             return null;
         }
         return PreviewEntry.interlude(line.startTimeMs, endTimeMs, previewInstrumentalKind(lineIndex, lineCount));
@@ -13876,6 +14086,31 @@ public final class MainActivity extends Activity implements
             offset += Character.charCount(codePoint);
         }
         return true;
+    }
+
+    private boolean isPreviewMusicNoteInterludeMarkerText(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+
+        boolean containsMusicNote = false;
+        for (int offset = 0; offset < text.length(); ) {
+            if (isPreviewHtmlSpaceEntity(text, offset, text.length())) {
+                offset += 6;
+                continue;
+            }
+            int codePoint = text.codePointAt(offset);
+            if (!isPreviewInterludeMarkerCodePoint(codePoint)) {
+                return false;
+            }
+            containsMusicNote |= isPreviewMusicNoteCodePoint(codePoint);
+            offset += Character.charCount(codePoint);
+        }
+        return containsMusicNote;
+    }
+
+    private boolean isPreviewMusicNoteCodePoint(int codePoint) {
+        return codePoint >= 0x2669 && codePoint <= 0x266C;
     }
 
     private boolean isPreviewHtmlSpaceEntity(String text, int offset, int end) {

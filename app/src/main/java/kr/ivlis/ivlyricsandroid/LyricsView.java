@@ -140,7 +140,8 @@ public final class LyricsView extends View {
     private boolean interludeLabelsEnabled = true;
     private boolean syncedLyricsKaraokeAnimationEnabled = true;
     private boolean karaokeBounceEffectEnabled = true;
-    private boolean karaokeDataAsLineSynced;
+    private String karaokeDisplayGranularity = AiLyricsSettings.KARAOKE_DISPLAY_CHARACTER;
+    private String lyricsSegmentationLocale = "auto";
     private boolean japaneseFuriganaEnabled;
     private boolean pronunciationLoading;
     private boolean translationLoading;
@@ -429,11 +430,25 @@ public final class LyricsView extends View {
         postInvalidateOnAnimation();
     }
 
-    void setKaraokeDataAsLineSynced(boolean enabled) {
-        if (karaokeDataAsLineSynced == enabled) {
+    void setKaraokeDisplayGranularity(String granularity) {
+        String normalized = AiLyricsSettings.normalizeKaraokeDisplayGranularity(granularity);
+        if (karaokeDisplayGranularity.equals(normalized)) {
             return;
         }
-        karaokeDataAsLineSynced = enabled;
+        karaokeDisplayGranularity = normalized;
+        rowLayoutCache.clear();
+        invalidateFrameGroupCache();
+        bounceStates.clear();
+        completedBounceKeys.clear();
+        postInvalidateOnAnimation();
+    }
+
+    void setLyricsSegmentationLocale(String locale) {
+        String normalized = locale == null || locale.trim().isEmpty() ? "auto" : locale.trim();
+        if (lyricsSegmentationLocale.equalsIgnoreCase(normalized)) {
+            return;
+        }
+        lyricsSegmentationLocale = normalized;
         rowLayoutCache.clear();
         invalidateFrameGroupCache();
         bounceStates.clear();
@@ -1359,7 +1374,15 @@ public final class LyricsView extends View {
     }
 
     private boolean shouldRenderKaraokeTiming() {
-        return karaoke && !karaokeDataAsLineSynced;
+        return karaoke && !isLineDisplayGranularity();
+    }
+
+    private boolean isLineDisplayGranularity() {
+        return AiLyricsSettings.KARAOKE_DISPLAY_LINE.equals(karaokeDisplayGranularity);
+    }
+
+    private boolean isWordDisplayGranularity() {
+        return AiLyricsSettings.KARAOKE_DISPLAY_WORD.equals(karaokeDisplayGranularity);
     }
 
     private List<DrawGroup> buildLyricGroups(DisplayLine displayLine, boolean active, float distance) {
@@ -1932,7 +1955,8 @@ public final class LyricsView extends View {
                 + ":s:" + Math.round(textSize)
                 + ":ruby:" + (japaneseFuriganaEnabled ? (rubyText == null ? 0 : rubyText.hashCode()) : 0)
                 + ":fake:" + syncedLyricsKaraokeAnimationEnabled
-                + ":line:" + karaokeDataAsLineSynced;
+                + ":granularity:" + karaokeDisplayGranularity
+                + ":styles:" + inlineStyleHash(syllables);
         List<TextRow> cached = rowLayoutCache.get(key);
         if (cached != null) {
             return cached;
@@ -1940,6 +1964,17 @@ public final class LyricsView extends View {
         List<TextRow> rows = wrapSegments(text, rubyText, syllables, startTimeMs, endTimeMs, textSize);
         rowLayoutCache.put(key, rows);
         return rows;
+    }
+
+    private int inlineStyleHash(List<LyricsLine.Syllable> syllables) {
+        if (syllables == null || syllables.isEmpty()) return 0;
+        int hash = 1;
+        for (LyricsLine.Syllable syllable : syllables) {
+            if (syllable == null || !syllable.inlineStyle) continue;
+            hash = 31 * hash + syllable.text.hashCode();
+            hash = 31 * hash + syllable.styleKey().hashCode();
+        }
+        return hash;
     }
 
     private String partKey(LyricsLine.VocalPart part, int index) {
@@ -2202,7 +2237,7 @@ public final class LyricsView extends View {
         int canvasSave = canvas.save();
         applyCanvasEffect(
                 canvas,
-                group.kind,
+                row.hasInlineEffects ? "vocal" : group.kind,
                 group.active,
                 left + row.width * 0.5f,
                 baseline,
@@ -2210,6 +2245,8 @@ public final class LyricsView extends View {
                 group.rowSeed + rowIndex
         );
 
+        // Joining scripts must stay in one shaping context. Inline range styling is
+        // intentionally degraded to the row style here instead of splitting glyphs.
         if (row.continuousShaping && !row.hasRuby()) {
             drawContinuouslyShapedRow(canvas, row, left, baseline, group, rowIndex, fadeAlpha);
             canvas.restoreToCount(canvasSave);
@@ -2217,7 +2254,7 @@ public final class LyricsView extends View {
             return;
         }
 
-        if (!group.active && !row.hasRuby()) {
+        if (!group.active && !row.hasRuby() && !row.hasInlineStyles) {
             configurePaint(scaleAlpha(group.inactiveColor, fadeAlpha), group.kind, false, group.textSize, false, group.typeface);
             canvas.drawText(row.text, left, baseline, textPaint);
             canvas.restoreToCount(canvasSave);
@@ -2228,11 +2265,35 @@ public final class LyricsView extends View {
         float cursor = left;
         for (int index = 0; index < row.segments.size(); index++) {
             TextSegment segment = row.segments.get(index);
-            float offsetY = "wave".equals(group.kind)
-                    ? baseWaveOffset(group.kind, group.rowSeed + rowIndex, index, group.textSize)
+            String segmentKind = segment.inlineStyle ? normalizeKind(segment.styleKind) : group.kind;
+            int segmentActiveColor = segment.inlineStyle && !segment.styleSpeaker.isEmpty()
+                    ? colorForSpeaker(
+                            segment.styleSpeaker,
+                            segment.styleSpeakerColor,
+                            segment.styleSpeakerFallback,
+                            "",
+                            group.activeColor
+                    )
+                    : group.activeColor;
+            int segmentInactiveColor = segment.inlineStyle && !segment.styleSpeaker.isEmpty()
+                    ? withAlpha(segmentActiveColor, Color.alpha(group.inactiveColor))
+                    : group.inactiveColor;
+            float offsetY = "wave".equals(segmentKind)
+                    ? baseWaveOffset(segmentKind, group.rowSeed + rowIndex, index, group.textSize)
                     : 0f;
             KaraokeBounce bounce = karaokeBounce(segment, group);
             int segmentSave = canvas.save();
+            if (segment.inlineStyle) {
+                applyCanvasEffect(
+                        canvas,
+                        segmentKind,
+                        group.active,
+                        cursor + segment.width * 0.5f,
+                        baseline,
+                        group.textSize,
+                        group.rowSeed + rowIndex + segment.sourceIndex
+                );
+            }
             if (bounce.active) {
                 float pivotX = cursor + segment.width * 0.5f;
                 float pivotY = baseline - group.textSize * 0.45f;
@@ -2241,14 +2302,20 @@ public final class LyricsView extends View {
             }
 
             float fill = group.active ? segmentFillFraction(segment) : 0f;
-            drawRubyText(canvas, segment, cursor, baseline + offsetY, group, fill, fadeAlpha);
+            drawRubyText(
+                    canvas, segment, cursor, baseline + offsetY, group, fill, fadeAlpha,
+                    segmentKind, segmentInactiveColor, segmentActiveColor
+            );
 
             float textLeft = cursor + segment.textInset;
-            configurePaint(scaleAlpha(group.inactiveColor, fadeAlpha), group.kind, group.active, group.textSize, false, group.typeface);
+            configurePaint(scaleAlpha(segmentInactiveColor, fadeAlpha), segmentKind, group.active, group.textSize, false, group.typeface);
             canvas.drawText(segment.text, textLeft, baseline + offsetY, textPaint);
 
             if (fill > 0f) {
-                drawActiveFill(canvas, segment, cursor, baseline, offsetY, group, fill, fadeAlpha);
+                drawActiveFill(
+                        canvas, segment, cursor, baseline, offsetY, group, fill, fadeAlpha,
+                        segmentKind, segmentActiveColor
+                );
             }
             canvas.restoreToCount(segmentSave);
             cursor += segment.width;
@@ -2424,14 +2491,17 @@ public final class LyricsView extends View {
             float baseline,
             DrawGroup group,
             float fill,
-            float fadeAlpha
+            float fadeAlpha,
+            String kind,
+            int inactiveColor,
+            int activeColor
     ) {
         if (segment.rubyText == null || segment.rubyText.trim().isEmpty() || group.supplement) {
             return;
         }
         float rubySize = Math.max(sp(9f), group.textSize * FURIGANA_TEXT_RATIO);
-        int color = fill > 0f ? group.activeColor : group.inactiveColor;
-        configurePaint(scaleAlpha(color, fadeAlpha * 0.84f), group.kind, false, rubySize, false, group.typeface);
+        int color = fill > 0f ? activeColor : inactiveColor;
+        configurePaint(scaleAlpha(color, fadeAlpha * 0.84f), kind, false, rubySize, false, group.typeface);
         float rubyWidth = segment.cachedRubyWidth;
         if (Float.isNaN(rubyWidth)) {
             rubyWidth = textPaint.measureText(segment.rubyText);
@@ -2450,7 +2520,9 @@ public final class LyricsView extends View {
             float offsetY,
             DrawGroup group,
             float fill,
-            float fadeAlpha
+            float fadeAlpha,
+            String kind,
+            int segmentActiveColor
     ) {
         float safeFill = clamp(fill);
         float textLeft = cursor + segment.textInset;
@@ -2459,14 +2531,14 @@ public final class LyricsView extends View {
         float top = baseline - group.textSize * 1.28f;
         float bottom = baseline + group.textSize * 0.48f;
         float softWidth = Math.min(sp(7f), Math.max(0f, segment.textWidth * 0.30f));
-        int activeColor = scaleAlpha(group.activeColor, fadeAlpha);
+        int activeColor = scaleAlpha(segmentActiveColor, fadeAlpha);
         float clipRight = safeFill >= 0.995f
                 ? textRight
                 : Math.min(textRight, fillRight + softWidth);
 
         int clipSave = canvas.save();
         canvas.clipRect(textLeft, top, clipRight, bottom);
-        configurePaint(activeColor, group.kind, group.active, group.textSize, true, group.typeface);
+        configurePaint(activeColor, kind, group.active, group.textSize, true, group.typeface);
 
         if (safeFill < 0.995f && softWidth > 1f && clipRight > textLeft) {
             float softStart = Math.max(textLeft, fillRight - softWidth * 0.42f);
@@ -2749,7 +2821,8 @@ public final class LyricsView extends View {
                 Math.max(start, end),
                 source.sourceIndex,
                 length,
-                rubyForSplitSegment(source, safeOffset, length)
+                rubyForSplitSegment(source, safeOffset, length),
+                source.styleSyllable()
         );
         return split.withFillTiming(fillStart, Math.max(fillStart, fillEnd));
     }
@@ -2921,11 +2994,14 @@ public final class LyricsView extends View {
     ) {
         List<TextSegment> segments = new ArrayList<>();
         List<RubyAnnotation> rubyAnnotations = parseRubyAnnotations(text, rubyText);
-        if (karaokeDataAsLineSynced) {
+        boolean hasInlineStyles = hasInlineSyllableStyles(syllables);
+        if (isLineDisplayGranularity() && !hasInlineStyles) {
             return buildUntimedSegments(text, rubyAnnotations);
         }
         if (syllables != null && !syllables.isEmpty()) {
-            List<LyricsLine.Syllable> renderSyllables = TimedSyllableNormalizer.normalize(syllables);
+            List<LyricsLine.Syllable> renderSyllables = isWordDisplayGranularity()
+                    ? TimedSyllableNormalizer.groupForWordDisplay(syllables, lyricsSegmentationLocale)
+                    : TimedSyllableNormalizer.normalize(syllables);
             int charOffset = 0;
             for (int index = 0; index < renderSyllables.size(); index++) {
                 LyricsLine.Syllable syllable = renderSyllables.get(index);
@@ -2933,11 +3009,12 @@ public final class LyricsView extends View {
                 int charLength = Math.max(1, value.codePointCount(0, value.length()));
                 segments.add(createMeasuredSegment(
                         value,
-                        syllable.startTimeMs,
-                        syllable.endTimeMs,
+                        isLineDisplayGranularity() ? 0L : syllable.startTimeMs,
+                        isLineDisplayGranularity() ? 0L : syllable.endTimeMs,
                         charOffset,
                         charLength,
-                        rubyForRange(rubyAnnotations, charOffset, charLength)
+                        rubyForRange(rubyAnnotations, charOffset, charLength),
+                        syllable
                 ));
                 charOffset += charLength;
             }
@@ -2958,7 +3035,10 @@ public final class LyricsView extends View {
             syntheticSyllables.add(new LyricsLine.Syllable(value, start, end));
         }
         int charOffset = 0;
-        for (LyricsLine.Syllable syllable : TimedSyllableNormalizer.normalize(syntheticSyllables)) {
+        List<LyricsLine.Syllable> renderSyllables = isWordDisplayGranularity()
+                ? TimedSyllableNormalizer.groupForWordDisplay(syntheticSyllables, lyricsSegmentationLocale)
+                : TimedSyllableNormalizer.normalize(syntheticSyllables);
+        for (LyricsLine.Syllable syllable : renderSyllables) {
             String value = syllable.text == null ? "" : syllable.text;
             int charLength = Math.max(1, value.codePointCount(0, value.length()));
             segments.add(createMeasuredSegment(
@@ -2972,6 +3052,14 @@ public final class LyricsView extends View {
             charOffset += charLength;
         }
         return segments;
+    }
+
+    private boolean hasInlineSyllableStyles(List<LyricsLine.Syllable> syllables) {
+        if (syllables == null) return false;
+        for (LyricsLine.Syllable syllable : syllables) {
+            if (syllable != null && syllable.inlineStyle) return true;
+        }
+        return false;
     }
 
     private List<TextSegment> buildUntimedSegments(String text, List<RubyAnnotation> annotations) {
@@ -3052,10 +3140,36 @@ public final class LyricsView extends View {
             int sourceLength,
             String rubyText
     ) {
+        return createMeasuredSegment(text, startTimeMs, endTimeMs, sourceIndex, sourceLength, rubyText, null);
+    }
+
+    private TextSegment createMeasuredSegment(
+            String text,
+            long startTimeMs,
+            long endTimeMs,
+            int sourceIndex,
+            int sourceLength,
+            String rubyText,
+            LyricsLine.Syllable styleSource
+    ) {
         String safeText = text == null ? "" : text;
         float textWidth = textPaint.measureText(safeText);
         float width = rubyAwareSegmentWidth(textWidth, rubyText);
-        return new TextSegment(safeText, textWidth, width, startTimeMs, endTimeMs, sourceIndex, sourceLength, rubyText);
+        return new TextSegment(
+                safeText,
+                textWidth,
+                width,
+                startTimeMs,
+                endTimeMs,
+                sourceIndex,
+                sourceLength,
+                rubyText,
+                styleSource != null && styleSource.inlineStyle,
+                styleSource == null ? "" : styleSource.styleKind,
+                styleSource == null ? "" : styleSource.styleSpeaker,
+                styleSource == null ? "" : styleSource.styleSpeakerColor,
+                styleSource == null ? "" : styleSource.styleSpeakerFallback
+        );
     }
 
     private float rubyAwareSegmentWidth(float textWidth, String rubyText) {
@@ -3391,6 +3505,9 @@ public final class LyricsView extends View {
     }
 
     private float segmentFillFraction(TextSegment segment) {
+        if (isWordDisplayGranularity()) {
+            return positionMs >= segment.fillStartTimeMs ? 1f : 0f;
+        }
         if (positionMs >= segment.fillEndTimeMs) {
             return 1f;
         }
@@ -3695,12 +3812,16 @@ public final class LyricsView extends View {
     }
 
     private InterludeInfo interludeInfoForLine(LyricsLine line, int lineIndex, int lineCount) {
-        if (line == null || !line.isTimed() || !isInterludeMarkerText(interludeCandidateText(line))) {
+        String markerText = interludeCandidateText(line);
+        if (line == null || !line.isTimed() || !isInterludeMarkerText(markerText)) {
             return InterludeInfo.none();
         }
         long endTimeMs = Math.max(line.endTimeMs, nextRenderableLineStartAfter(lineIndex));
         long durationMs = endTimeMs > line.startTimeMs ? endTimeMs - line.startTimeMs : 0L;
-        if (durationMs <= INTERLUDE_MIN_DURATION_MS) {
+        long minimumDurationMs = isMusicNoteInterludeMarkerText(markerText)
+                ? 0L
+                : INTERLUDE_MIN_DURATION_MS;
+        if (durationMs <= minimumDurationMs) {
             return InterludeInfo.none();
         }
         return new InterludeInfo(true, line.startTimeMs, endTimeMs, instrumentalKind(lineIndex, lineCount), false);
@@ -3844,6 +3965,31 @@ public final class LyricsView extends View {
         return true;
     }
 
+    private boolean isMusicNoteInterludeMarkerText(String text) {
+        String normalized = unwrapInterludeMarkerText(decodeInterludeMarkerText(text));
+        normalized = Normalizer.normalize(normalized, Normalizer.Form.NFKC).trim();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+
+        boolean containsMusicNote = false;
+        for (int offset = 0; offset < normalized.length(); ) {
+            int codePoint = normalized.codePointAt(offset);
+            if (!isInterludeMarkerCodePoint(codePoint)) {
+                return false;
+            }
+            containsMusicNote |= isInterludeMusicNoteCodePoint(codePoint);
+            offset += Character.charCount(codePoint);
+        }
+        return containsMusicNote;
+    }
+
+    private boolean isInterludeMusicNoteCodePoint(int codePoint) {
+        return (codePoint >= 0x2669 && codePoint <= 0x266F)
+                || (codePoint >= 0x1D100 && codePoint <= 0x1D1FF)
+                || (codePoint >= 0x1F3B5 && codePoint <= 0x1F3BC);
+    }
+
     private boolean isInterludeMarkerCodePoint(int codePoint) {
         return Character.isWhitespace(codePoint)
                 || Character.isSpaceChar(codePoint)
@@ -3925,15 +4071,15 @@ public final class LyricsView extends View {
                     continue;
                 }
                 if (positionMs >= segment.fillStartTimeMs && positionMs < segment.fillEndTimeMs) {
-                    return segment.sourceIndex;
+                    return segment.centerSourceIndex();
                 }
                 if (positionMs >= segment.fillEndTimeMs && segment.fillEndTimeMs >= fallbackEnd) {
                     fallbackEnd = segment.fillEndTimeMs;
-                    fallbackIndex = segment.sourceIndex;
+                    fallbackIndex = segment.centerSourceIndex();
                 }
                 if (positionMs < segment.fillStartTimeMs && segment.fillStartTimeMs < nextStart) {
                     nextStart = segment.fillStartTimeMs;
-                    nextIndex = segment.sourceIndex;
+                    nextIndex = segment.centerSourceIndex();
                 }
             }
         }
@@ -3947,7 +4093,7 @@ public final class LyricsView extends View {
         if (!MotionPreferences.animationsEnabled(getContext())) {
             return karaokeBounceResult.set(0f, 1f, false);
         }
-        if (karaokeDataAsLineSynced || !karaokeBounceEffectEnabled || !group.active || group.activeSegmentIndex < 0) {
+        if (isLineDisplayGranularity() || !karaokeBounceEffectEnabled || !group.active || group.activeSegmentIndex < 0) {
             return KaraokeBounce.IDLE;
         }
 
@@ -4015,6 +4161,30 @@ public final class LyricsView extends View {
     private String normalizeKind(String kind) {
         String value = kind == null ? "" : kind.trim().toLowerCase(Locale.ROOT);
         return value.isEmpty() ? "vocal" : value;
+    }
+
+    private static boolean isInlineEffectKind(String kind) {
+        String value = kind == null ? "" : kind.trim().toLowerCase(Locale.ROOT);
+        switch (value) {
+            case "effect":
+            case "adlib":
+            case "pulse":
+            case "wave":
+            case "sparkle":
+            case "echo":
+            case "whisper":
+            case "bounce":
+            case "sway":
+            case "glow":
+            case "glitch":
+            case "flicker":
+            case "float":
+            case "blur":
+            case "pop":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private int colorForSpeaker(String speaker, String speakerColor, String speakerFallback, String role, int fallback) {
@@ -4627,23 +4797,31 @@ public final class LyricsView extends View {
         float width;
         final boolean hasRuby;
         final boolean continuousShaping;
+        final boolean hasInlineStyles;
+        final boolean hasInlineEffects;
 
         TextRow(List<TextSegment> segments) {
             this.segments = segments == null ? Collections.emptyList() : segments;
             StringBuilder builder = new StringBuilder();
             float totalWidth = 0f;
             boolean nextHasRuby = false;
+            boolean nextHasInlineStyles = false;
+            boolean nextHasInlineEffects = false;
             for (TextSegment segment : this.segments) {
                 builder.append(segment.text);
                 totalWidth += segment.width;
                 if (segment.rubyText != null && !segment.rubyText.trim().isEmpty()) {
                     nextHasRuby = true;
                 }
+                nextHasInlineStyles |= segment.inlineStyle;
+                nextHasInlineEffects |= segment.inlineStyle && isInlineEffectKind(segment.styleKind);
             }
             this.text = builder.toString();
             this.width = Math.max(0f, totalWidth);
             this.hasRuby = nextHasRuby;
             this.continuousShaping = TimedSyllableNormalizer.requiresContinuousShaping(this.text);
+            this.hasInlineStyles = nextHasInlineStyles;
+            this.hasInlineEffects = nextHasInlineEffects;
         }
 
         boolean hasRuby() {
@@ -4673,6 +4851,11 @@ public final class LyricsView extends View {
         final int sourceIndex;
         final int sourceLength;
         final String rubyText;
+        final boolean inlineStyle;
+        final String styleKind;
+        final String styleSpeaker;
+        final String styleSpeakerColor;
+        final String styleSpeakerFallback;
         float cachedRubyWidth = Float.NaN;
         String cachedBounceKeyPrefix;
         String cachedBounceKey;
@@ -4701,6 +4884,52 @@ public final class LyricsView extends View {
                 int sourceLength,
                 String rubyText
         ) {
+            this(
+                    text, textWidth, width, startTimeMs, endTimeMs,
+                    fillStartTimeMs, fillEndTimeMs, sourceIndex, sourceLength, rubyText,
+                    false, "", "", "", ""
+            );
+        }
+
+        TextSegment(
+                String text,
+                float textWidth,
+                float width,
+                long startTimeMs,
+                long endTimeMs,
+                int sourceIndex,
+                int sourceLength,
+                String rubyText,
+                boolean inlineStyle,
+                String styleKind,
+                String styleSpeaker,
+                String styleSpeakerColor,
+                String styleSpeakerFallback
+        ) {
+            this(
+                    text, textWidth, width, startTimeMs, endTimeMs,
+                    startTimeMs, endTimeMs, sourceIndex, sourceLength, rubyText,
+                    inlineStyle, styleKind, styleSpeaker, styleSpeakerColor, styleSpeakerFallback
+            );
+        }
+
+        TextSegment(
+                String text,
+                float textWidth,
+                float width,
+                long startTimeMs,
+                long endTimeMs,
+                long fillStartTimeMs,
+                long fillEndTimeMs,
+                int sourceIndex,
+                int sourceLength,
+                String rubyText,
+                boolean inlineStyle,
+                String styleKind,
+                String styleSpeaker,
+                String styleSpeakerColor,
+                String styleSpeakerFallback
+        ) {
             this.text = text == null ? "" : text;
             this.textWidth = Math.max(0f, textWidth);
             this.width = Math.max(0f, width);
@@ -4712,6 +4941,11 @@ public final class LyricsView extends View {
             this.sourceIndex = Math.max(0, sourceIndex);
             this.sourceLength = Math.max(1, sourceLength);
             this.rubyText = rubyText == null ? "" : rubyText;
+            this.inlineStyle = inlineStyle;
+            this.styleKind = styleKind == null ? "" : styleKind;
+            this.styleSpeaker = styleSpeaker == null ? "" : styleSpeaker;
+            this.styleSpeakerColor = styleSpeakerColor == null ? "" : styleSpeakerColor;
+            this.styleSpeakerFallback = styleSpeakerFallback == null ? "" : styleSpeakerFallback;
         }
 
         TextSegment withFillTiming(long fillStartTimeMs, long fillEndTimeMs) {
@@ -4725,7 +4959,26 @@ public final class LyricsView extends View {
                     fillEndTimeMs,
                     sourceIndex,
                     sourceLength,
-                    rubyText
+                    rubyText,
+                    inlineStyle,
+                    styleKind,
+                    styleSpeaker,
+                    styleSpeakerColor,
+                    styleSpeakerFallback
+            );
+        }
+
+        LyricsLine.Syllable styleSyllable() {
+            return new LyricsLine.Syllable(
+                    text,
+                    startTimeMs,
+                    endTimeMs,
+                    false,
+                    inlineStyle,
+                    styleKind,
+                    styleSpeaker,
+                    styleSpeakerColor,
+                    styleSpeakerFallback
             );
         }
 
@@ -4736,6 +4989,10 @@ public final class LyricsView extends View {
                 cachedBounceKey = safePrefix + ':' + sourceIndex;
             }
             return cachedBounceKey;
+        }
+
+        int centerSourceIndex() {
+            return sourceIndex + Math.max(0, sourceLength - 1) / 2;
         }
     }
 
