@@ -37,7 +37,7 @@ final class AiLyricsRepository {
     private static final int CONNECT_TIMEOUT_MS = 12_000;
     private static final int READ_TIMEOUT_MS = 70_000;
     private static final long STREAM_PARTIAL_DISPATCH_INTERVAL_MS = 600L;
-    private static final String SUPPLEMENT_PROMPT_VERSION = "v9-singer-japanese-fidelity";
+    private static final String SUPPLEMENT_PROMPT_VERSION = "v10-source-equivalent-translation-visible";
     private static final String TMI_PROMPT_VERSION = ResearchDocument.OUTPUT_VERSION;
     private static final String CULTURAL_ANNOTATION_PROMPT_VERSION = "cultural-v4";
     private static final int MAX_LYRICS_MEMORY_ENTRIES = 250;
@@ -468,8 +468,8 @@ final class AiLyricsRepository {
         SupplementResult(SupplementRequest request, String pronunciation, String translation) {
             this.request = request;
             String sourceText = request == null ? "" : request.text;
-            String nextPronunciation = sanitizeSupplement(pronunciation, sourceText);
-            String nextTranslation = sanitizeSupplement(translation, sourceText);
+            String nextPronunciation = sanitizePronunciation(pronunciation, sourceText);
+            String nextTranslation = sanitizeTranslation(translation);
             if (!nextPronunciation.isEmpty()
                     && LyricsTextComparison.areEquivalent(nextPronunciation, nextTranslation)) {
                 nextPronunciation = "";
@@ -479,9 +479,15 @@ final class AiLyricsRepository {
         }
     }
 
-    private static String sanitizeSupplement(String value, String sourceText) {
-        String trimmed = value == null ? "" : value.trim();
+    private static String sanitizePronunciation(String value, String sourceText) {
+        String trimmed = sanitizeTranslation(value);
         return areSourceEquivalent(trimmed, sourceText) ? "" : trimmed;
+    }
+
+    private static String sanitizeTranslation(String value) {
+        // A code-switched hook may intentionally remain identical to the source.
+        // Keep it as a real translation row so one-to-one display alignment is preserved.
+        return value == null ? "" : value.trim();
     }
 
     private static final class TaggedOutputLine {
@@ -1083,14 +1089,11 @@ final class AiLyricsRepository {
             return baseLine;
         }
         if (baseLine.vocalParts == null || baseLine.vocalParts.isEmpty()) {
-            String pronunciation = sanitizeSupplement(
+            String pronunciation = sanitizePronunciation(
                     cachedLine.pronunciationText,
                     displayLineText(baseLine)
             );
-            String translation = sanitizeSupplement(
-                    cachedLine.translationText,
-                    displayLineText(baseLine)
-            );
+            String translation = sanitizeTranslation(cachedLine.translationText);
             if (!pronunciation.isEmpty()
                     && LyricsTextComparison.areEquivalent(pronunciation, translation)) {
                 pronunciation = "";
@@ -1117,8 +1120,8 @@ final class AiLyricsRepository {
             }
             matchedCachedPart = true;
             String sourceText = displayPartText(basePart);
-            String pronunciation = sanitizeSupplement(cachedPart.pronunciationText, sourceText);
-            String translation = sanitizeSupplement(cachedPart.translationText, sourceText);
+            String pronunciation = sanitizePronunciation(cachedPart.pronunciationText, sourceText);
+            String translation = sanitizeTranslation(cachedPart.translationText);
             if (!pronunciation.isEmpty()
                     && LyricsTextComparison.areEquivalent(pronunciation, translation)) {
                 pronunciation = "";
@@ -1133,10 +1136,10 @@ final class AiLyricsRepository {
         }
         String pronunciationText = matchedCachedPart
                 ? joinNonEmpty(pronunciationParts)
-                : sanitizeSupplement(cachedLine.pronunciationText, displayLineText(baseLine));
+                : sanitizePronunciation(cachedLine.pronunciationText, displayLineText(baseLine));
         String translationText = matchedCachedPart
                 ? joinNonEmpty(translationParts)
-                : sanitizeSupplement(cachedLine.translationText, displayLineText(baseLine));
+                : sanitizeTranslation(cachedLine.translationText);
         if (!pronunciationText.isEmpty()
                 && LyricsTextComparison.areEquivalent(pronunciationText, translationText)) {
             pronunciationText = "";
