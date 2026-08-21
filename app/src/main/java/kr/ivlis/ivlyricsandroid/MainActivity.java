@@ -149,7 +149,10 @@ public final class MainActivity extends Activity implements
     private static final String KEY_RESEARCH_TOKEN_CONSENT_V1 = "token_consent_v1";
     private static final String KEY_LAST_AUTO_UPDATE_CHECK_MS = "last_auto_update_check_ms";
     private static final long AUTO_UPDATE_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L;
-    private static final long PLAYBACK_CLOCK_INTERVAL_MS = 33L;
+    // Keep karaoke fill/bounce updates on the display cadence. The previous
+    // 30 Hz clock made otherwise smooth Canvas animation visibly step between
+    // syllables, especially while a line transition was running.
+    private static final long PLAYBACK_CLOCK_INTERVAL_MS = 16L;
     private static final int ONBOARDING_STEP_COUNT = 3;
     private static final int LYRICS_PAGE_TOP_PADDING_EXPANDED_DP = 46;
     private static final int LYRICS_PAGE_TOP_PADDING_COMPACT_DP = 22;
@@ -320,6 +323,7 @@ public final class MainActivity extends Activity implements
     private View pollinationsAuthGroup;
     private TextView uiLanguageSelectButton;
     private TextView outputLanguageSelectButton;
+    private TextView pronunciationNotationSelectButton;
     private TextView settingsCategoryTitleView;
     private TextView sourceLanguageSelectButton;
     private ScrollView settingsScrollView;
@@ -4218,6 +4222,16 @@ public final class MainActivity extends Activity implements
                 outputLanguageSelectButton
         ), topMargin(matchWrap(), dp(12)));
 
+        pronunciationNotationSelectButton = settingsSelectButton("");
+        pronunciationNotationSelectButton.setOnClickListener(
+                view -> showPronunciationNotationPopup(pronunciationNotationSelectButton)
+        );
+        settingsGeneralPage.addView(settingGroup(
+                ui("setting.pronunciation_notation"),
+                ui("setting.pronunciation_notation_desc"),
+                pronunciationNotationSelectButton
+        ), topMargin(matchWrap(), dp(12)));
+
         metadataTranslationSwitch = settingSwitch(
                 ui("setting.metadata_translation"),
                 ui("setting.metadata_translation_desc")
@@ -7919,6 +7933,7 @@ public final class MainActivity extends Activity implements
         }
         updateUiLanguageSelect(snapshot.uiLang);
         updateOutputLanguageSelect(snapshot.outputLang);
+        updatePronunciationNotationSelect(snapshot.pronunciationNotation);
         rebuildPreviewModeButtons(snapshot.previewItems);
         updateSourceLanguageSelect();
         populateSelectedLanguageRule(snapshot);
@@ -7972,6 +7987,59 @@ public final class MainActivity extends Activity implements
             requestAiLyrics(false);
             showSavedToast(ui("toast.pronunciation_language_saved"));
         });
+    }
+
+    private void updatePronunciationNotationSelect(String notation) {
+        if (pronunciationNotationSelectButton == null) {
+            return;
+        }
+        pronunciationNotationSelectButton.setText(pronunciationNotationLabel(notation) + "  v");
+    }
+
+    private void showPronunciationNotationPopup(View anchor) {
+        if (anchor == null || aiLyricsSettings == null) {
+            return;
+        }
+        AiLyricsSettings.Snapshot snapshot = aiLyricsSettings.snapshot();
+        showLanguageSelectPopup(
+                anchor,
+                pronunciationNotationChoices(),
+                snapshot.pronunciationNotation,
+                notation -> {
+                    aiLyricsSettings.setPronunciationNotation(notation);
+                    updatePronunciationNotationSelect(notation);
+                    requestAiLyrics(false);
+                    showSavedToast(ui("toast.settings_saved"));
+                }
+        );
+    }
+
+    private List<LanguageChoice> pronunciationNotationChoices() {
+        List<LanguageChoice> choices = new ArrayList<>();
+        choices.add(new LanguageChoice(
+                AiLyricsSettings.PRONUNCIATION_NOTATION_TRANSLATION,
+                ui("pronunciation.notation.translation")
+        ));
+        choices.add(new LanguageChoice(
+                AiLyricsSettings.PRONUNCIATION_NOTATION_LATIN,
+                ui("pronunciation.notation.latin")
+        ));
+        choices.add(new LanguageChoice(
+                AiLyricsSettings.PRONUNCIATION_NOTATION_IPA,
+                ui("pronunciation.notation.ipa")
+        ));
+        return choices;
+    }
+
+    private String pronunciationNotationLabel(String notation) {
+        String normalized = AiLyricsSettings.normalizePronunciationNotation(notation);
+        if (AiLyricsSettings.PRONUNCIATION_NOTATION_LATIN.equals(normalized)) {
+            return ui("pronunciation.notation.latin");
+        }
+        if (AiLyricsSettings.PRONUNCIATION_NOTATION_IPA.equals(normalized)) {
+            return ui("pronunciation.notation.ipa");
+        }
+        return ui("pronunciation.notation.translation");
     }
 
     private List<LanguageChoice> outputLanguageChoices() {
@@ -12972,34 +13040,35 @@ public final class MainActivity extends Activity implements
 
     private void updateLyricsProviderAttributionView(
             ProviderAttributionView attribution,
-            String provider,
+            CharSequence provider,
             CharSequence contributorCredit
     ) {
         if (attribution == null) {
             return;
         }
-        String value = provider == null ? "" : provider.trim();
+        CharSequence value = provider == null ? "" : provider;
+        String valueDescription = value.toString().trim();
         CharSequence credit = contributorCredit == null ? "" : contributorCredit;
-        if (value.isEmpty()) {
+        if (valueDescription.isEmpty()) {
             credit = "";
         }
         String creditDescription = credit.toString().trim();
         attribution.value.setText(value);
-        attribution.label.setVisibility(value.isEmpty() ? View.GONE : View.VISIBLE);
-        attribution.value.setVisibility(value.isEmpty() ? View.GONE : View.VISIBLE);
+        attribution.label.setVisibility(valueDescription.isEmpty() ? View.GONE : View.VISIBLE);
+        attribution.value.setVisibility(valueDescription.isEmpty() ? View.GONE : View.VISIBLE);
         if (attribution.contributor != null) {
             attribution.contributor.setText(credit);
             attribution.contributor.setVisibility(creditDescription.isEmpty() ? View.GONE : View.VISIBLE);
         }
         if (attribution.separator != null) {
             attribution.separator.setVisibility(
-                    !value.isEmpty() && !creditDescription.isEmpty() ? View.VISIBLE : View.GONE
+                    !valueDescription.isEmpty() && !creditDescription.isEmpty() ? View.VISIBLE : View.GONE
             );
         }
 
-        String providerDescription = value.isEmpty()
+        String providerDescription = valueDescription.isEmpty()
                 ? ""
-                : ui("lyrics.provider_attribution_label") + " " + value;
+                : ui("lyrics.provider_attribution_label") + " " + valueDescription;
         String description = creditDescription.isEmpty()
                 ? providerDescription
                 : providerDescription + ", " + creditDescription;
@@ -13165,7 +13234,7 @@ public final class MainActivity extends Activity implements
             if (builder.length() > 0) {
                 builder.append(", ");
             }
-            builder.append(contributorDisplayName(contributor));
+			builder.append(contributorDisplayName(contributor));
         }
         if (contributors.size() > count) {
             builder.append(" +").append(contributors.size() - count);

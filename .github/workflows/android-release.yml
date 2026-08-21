@@ -63,7 +63,7 @@ jobs:
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Run Android lint
-        run: ./gradlew :app:lintDebug
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug
 
       - name: Restore release signing key
         shell: bash
